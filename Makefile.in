@@ -4,30 +4,9 @@
 # Copyright: GPL (see COPYING or www.gnu.org
 ################################################################
 
-.SUFFIXES: .tex .dvi .doc .pl
+PACKAGE=plunit
+include ../Makefile.defs
 
-SHELL=@SHELL@
-PLBASE=@PLBASE@
-PLARCH=@PLARCH@
-PL=@PL@
-XPCEBASE=$(PLBASE)/xpce
-PKGDOC=$(PLBASE)/doc/packages
-PCEHOME=../xpce
-LIBDIR=$(PLBASE)/library
-EXDIR=$(PKGDOC)/examples/plunit
-
-DOCTOTEX=$(PCEHOME)/bin/doc2tex
-PLTOTEX=$(PCEHOME)/bin/pl2tex
-LATEX=latex
-DOC=plunit
-TEX=$(DOC).tex
-DVI=$(DOC).dvi
-PDF=$(DOC).pdf
-HTML=$(DOC).html
-
-INSTALL=@INSTALL@
-INSTALL_PROGRAM=@INSTALL_PROGRAM@
-INSTALL_DATA=@INSTALL_DATA@
 
 LIBPL=		plunit.pl test_wizard.pl test_cover.pl
 LIBALL=		$(LIBPL) $(SUPPORT)
@@ -36,16 +15,16 @@ EXAMPLES=	read.pl simple.pl
 all:		
 		@echo "Nothing to do for this package"
 
-install:	$(LIBPL)
-		mkdir -p $(DESTDIR)$(LIBDIR)
-		$(INSTALL_DATA) $(LIBALL) $(DESTDIR)$(LIBDIR)
+install:	$(addprefix $(srcdir)/, $(LIBPL))
+		mkdir -p $(DESTDIR)$(PLLIBDIR)
+		$(INSTALL_DATA) $(addprefix $(srcdir)/, $(LIBALL)) $(DESTDIR)$(PLLIBDIR)
 		$(PL) -f none -g make -t halt
 
-ln-install:	$(LIBPL)
-		mkdir -p $(DESTDIR)$(LIBDIR)
+ln-install:	$(addprefix $(srcdir)/, $(LIBPL))
+		mkdir -p $(DESTDIR)$(PLLIBDIR)
 		for f in $(LIBALL); do \
-		    rm -f $(DESTDIR)$(LIBDIR)/$$f; \
-		    ln -s `pwd`/$$f $(DESTDIR)$(LIBDIR); \
+		    rm -f $(DESTDIR)$(PLLIBDIR)/$$f; \
+		    ln -s $(srcdir)/$$f $(DESTDIR)$(PLLIBDIR); \
 		done
 		$(PL) -f none -g make -t halt
 
@@ -71,25 +50,6 @@ check::
 ################################################################
 # Documentation
 ################################################################
-
-doc:		$(PDF) $(HTML)
-pdf:		$(PDF)
-html:		$(HTML)
-
-$(HTML):	$(TEX)
-		latex2html $(DOC)
-		mv html/index.html $@
-		rmdir html
-
-$(PDF):		$(TEX)
-		../../man/runtex --pdf $(DOC)
-
-$(TEX):		$(DOCTOTEX)
-
-.doc.tex:
-		$(DOCTOTEX) $*.doc > $*.tex
-.pl.tex:
-		$(PLTOTEX) $*.pl > $*.tex
 
 ################################################################
 # Clean
