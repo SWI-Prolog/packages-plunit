@@ -85,7 +85,7 @@ sicstus :- catch(current_prolog_flag(system_type, _), _, fail).
 
 :- if(swi).
 throw_error(Error_term,Impldef) :-
-	throw(error(Error_term,Impldef)).
+	throw(error(Error_term,context(Impldef,_))).
 
 :- set_prolog_flag(generate_debug_info, false).
 :- use_module(library(option)).
@@ -319,7 +319,9 @@ unit_module(Unit, Module) :-
 make_unit_module(Unit, Module) :-
 	unit_module(Unit, Module),
 	(   current_module(Module),
-	    \+ current_unit(_, Module, _, _)
+	    \+ current_unit(_, Module, _, _),
+	    predicate_property(Module:H, _P),
+	    \+ predicate_property(Module:H, imported_from(_M))
 	->  throw_error(permission_error(create, plunit, Unit),
 			'Existing module')
 	;  true
