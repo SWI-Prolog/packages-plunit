@@ -254,11 +254,6 @@ begin_tests(Unit, Name, File:_Line, _Options) :-
 	'$set_source_module'(Old, Old),
 	asserta(loading_unit(Unit, Name, File, Old)).
 
-set_import_modules(Module, Imports) :-
-	findall(I, import_module(Module, I), IL),
-	forall(member(I, IL), delete_import_module(Module, I)),
-	forall(member(I, Imports), add_import_module(Module, I, end)).
-
 :- else.
 
 % we cannot use discontiguous as a goal in SICStus Prolog.
