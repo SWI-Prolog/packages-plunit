@@ -748,7 +748,10 @@ run_test(Unit, Name, Line, Options, Body) :-
 run_test_once(Unit, Name, Line, Options, Body) :-
 	current_test_flag(test_options, GlobalOptions),
 	option(sto(false), GlobalOptions, false), !,
+	current_unification_capability(Type),
+	begin_test(Unit, Name, Line, Type),
 	run_test_6(Unit, Name, Line, Options, Body, Result),
+	end_test(Unit, Name, Line, Type),
 	report_result(Result, Options).
 run_test_once(Unit, Name, Line, Options, Body) :-
 	current_unit(Unit, _Module, _Supers, UnitOptions),
@@ -766,7 +769,9 @@ run_test_cap(Unit, Name, Line, Options, Body) :-
 	(   option(sto(Type), Options)
 	->  unification_capability(Type),
 	    set_unification_capability(Type),
+	    begin_test(Unit, Name, Line, Type),
 	    run_test_6(Unit, Name, Line, Options, Body, Result),
+	    end_test(Unit, Name, Line, Type),
 	    report_result(Result, Options)
 	;   findall(Key-(Type+Result),
 		    test_caps(Type, Unit, Name, Line, Options, Body, Result, Key),
@@ -1215,10 +1220,10 @@ report_failed :-
 report_failed_assertions :-
 	number_of_clauses(failed_assertion/7, N),
 	N > 0, !,
-	info(plunit(failed_assertion(N))),
+	info(plunit(failed_assertions(N))),
 	fail.
 report_failed_assertions :-
-	info(plunit(failed_assertion(0))).
+	info(plunit(failed_assertions(0))).
 
 report_sto :-
 	number_of_clauses(sto/4, N),
