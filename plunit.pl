@@ -501,6 +501,7 @@ test_set_option(sto(V)) :-
 :- thread_local
 	passed/5,			% Unit, Test, Line, Det, Time
 	failed/4,			% Unit, Test, Line, Reason
+	failed_assertion/4,		% Unit, Test, Line, Reason
 	blocked/4,			% Unit, Test, Line, Reason
 	sto/4,				% Unit, Test, Line, Results
 	fixme/5.			% Unit, Test, Line, Reason, Status
@@ -510,19 +511,31 @@ test_set_option(sto(V)) :-
 
 %%	run_tests is semidet.
 %%	run_tests(+TestSet) is semidet.
+%
+%	Run  tests  and  report  about    the   results.  The  predicate
+%	run_tests/0 runs all known  tests  that   are  not  blocked. The
+%	predicate run_tests/1 takes a  specification   of  tests to run.
+%	This  is  either  a  single   specification    or   a   list  of
+%	specifications. Each single specification is  either the name of
+%	a test-unit or a term <test-unit>:<test>, denoting a single test
+%	within a unit.
 
 run_tests :-
 	cleanup,
-	forall(current_test_set(Set),
-	       run_unit(Set)),
-	report,
-	cleanup_after_test.
+	call_cleanup(
+	    forall(current_test_set(Set),
+		   run_unit(Set)),
+	    ( report,
+	      cleanup_after_test
+	    )).
 
 run_tests(Set) :-
 	cleanup,
-	run_unit(Set),
-	report,
-	cleanup_after_test.
+	call_cleanup(
+	    run_unit(Set),
+	    ( report,
+	      cleanup_after_test
+	    )).
 
 run_unit([]) :- !.
 run_unit([H|T]) :- !,
@@ -569,6 +582,7 @@ cleanup :-
 	thread_self(Me),
 	retractall(passed(_, _, _, _, _)),
 	retractall(failed(_, _, _, _)),
+	retractall(failed_assertion(_, _, _, _)),
 	retractall(blocked(_, _, _, _)),
 	retractall(sto(_, _, _, _)),
 	retractall(fixme(_, _, _, _, _)),
@@ -1099,16 +1113,18 @@ running_tests(Running) :-
 report :-
 	number_of_clauses(passed/5, Passed),
 	number_of_clauses(failed/4, Failed),
+	number_of_clauses(failed_assertion/4, FailedAssertion),
 	number_of_clauses(blocked/4, Blocked),
 	number_of_clauses(sto/4, STO),
-	(   Passed+Failed+Blocked+STO =:= 0
+	(   Passed+Failed+FailedAssertion+Blocked+STO =:= 0
 	->  info(plunit(no_tests))
-	;   Failed+Blocked+STO =:= 0
+	;   Failed+FailedAssertion+Blocked+STO =:= 0
 	->  report_fixme,
 	    info(plunit(all_passed(Passed)))
 	;   report_blocked,
 	    report_fixme,
 	    report_failed,
+	    report_failed_assertions,
 	    report_sto
 	).
 
@@ -1139,6 +1155,14 @@ report_failed :-
 	fail.
 report_failed :-
 	info(plunit(failed(0))).
+
+report_failed_assertions :-
+	number_of_clauses(failed_assertion/4, N),
+	N > 0, !,
+	info(plunit(failed_assertion(N))),
+	fail.
+report_failed_assertions :-
+	info(plunit(failed_assertion(0))).
 
 report_sto :-
 	number_of_clauses(sto/4, N),
@@ -1319,6 +1343,12 @@ message(plunit(failed(1))) --> !,
 	[ '1 test failed'-[] ].
 message(plunit(failed(N))) -->
 	[ '~D tests failed'-[N] ].
+message(plunit(failed_assertions(0))) --> !,
+	[].
+message(plunit(failed_assertions(1))) --> !,
+	[ '1 assertion failed'-[] ].
+message(plunit(failed_assertions(N))) -->
+	[ '~D assertions failed'-[N] ].
 message(plunit(sto(0))) --> !,
 	[].
 message(plunit(sto(N))) -->
