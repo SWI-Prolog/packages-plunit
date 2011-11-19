@@ -501,7 +501,7 @@ test_set_option(sto(V)) :-
 :- thread_local
 	passed/5,			% Unit, Test, Line, Det, Time
 	failed/4,			% Unit, Test, Line, Reason
-	failed_assertion/4,		% Unit, Test, Line, Reason
+	failed_assertion/7,		% Unit, Test, Line, ALoc, STO, Reason, Goal
 	blocked/4,			% Unit, Test, Line, Reason
 	sto/4,				% Unit, Test, Line, Results
 	fixme/5.			% Unit, Test, Line, Reason, Status
@@ -522,18 +522,22 @@ test_set_option(sto(V)) :-
 
 run_tests :-
 	cleanup,
-	call_cleanup(
+	setup_call_cleanup(
+	    setup_trap_assertions(Ref),
 	    forall(current_test_set(Set),
 		   run_unit(Set)),
-	    ( report,
+	    ( cleanup_trap_assertions(Ref),
+	      report,
 	      cleanup_after_test
 	    )).
 
 run_tests(Set) :-
 	cleanup,
-	call_cleanup(
+	setup_call_cleanup(
+	    setup_trap_assertions(Ref),
 	    run_unit(Set),
-	    ( report,
+	    ( cleanup_trap_assertions(Ref),
+	      report,
 	      cleanup_after_test
 	    )).
 
@@ -582,7 +586,7 @@ cleanup :-
 	thread_self(Me),
 	retractall(passed(_, _, _, _, _)),
 	retractall(failed(_, _, _, _)),
-	retractall(failed_assertion(_, _, _, _)),
+	retractall(failed_assertion(_, _, _, _, _, _, _)),
 	retractall(blocked(_, _, _, _)),
 	retractall(sto(_, _, _, _)),
 	retractall(fixme(_, _, _, _, _)),
@@ -670,6 +674,58 @@ unification_capability(_) :-
 
 :- endif.
 :- endif.
+
+		 /*******************************
+		 *	ASSERTION HANDLING	*
+		 *******************************/
+
+:- if(swi).
+
+:- dynamic prolog:assertion_failed/2.
+
+setup_trap_assertions(Ref) :-
+	asserta((prolog:assertion_failed(Reason, Goal) :-
+			test_assertion_failed(Reason, Goal)),
+		Ref).
+
+cleanup_trap_assertions(Ref) :-
+	erase(Ref).
+
+test_assertion_failed(Reason, Goal) :-
+	thread_self(Me),
+	running(Unit, Test, Line, STO, Me),
+	(   catch(get_prolog_backtrace(10, Stack), _, fail),
+	    assertion_location(Stack, AssertLoc)
+	->  true
+	;   AssertLoc = unknown
+	),
+	current_test_flag(test_options, Options),
+	report_failed_assertion(Unit, Test, Line, AssertLoc,
+				STO, Reason, Goal, Options),
+	assert_cyclic(failed_assertion(Unit, Test, Line, AssertLoc,
+				       STO, Reason, Goal)).
+
+assertion_location(Stack, File:Line) :-
+	append(_, [AssertFrame,CallerFrame|_], Stack),
+	prolog_stack_frame_property(AssertFrame, predicate(debug:assertion/1)), !,
+	prolog_stack_frame_property(CallerFrame, location(File:Line)).
+
+report_failed_assertion(Unit, Test, Line, AssertLoc,
+			STO, Reason, Goal, _Options) :-
+	print_message(
+	    error,
+	    plunit(failed_assertion(Unit, Test, Line, AssertLoc,
+				    STO, Reason, Goal))).
+
+:- else.
+
+setup_trap_assertions(_).
+cleanup_trap_assertions(_).
+
+:- endif.
+
+
+
 
 
 		 /*******************************
@@ -1113,7 +1169,7 @@ running_tests(Running) :-
 report :-
 	number_of_clauses(passed/5, Passed),
 	number_of_clauses(failed/4, Failed),
-	number_of_clauses(failed_assertion/4, FailedAssertion),
+	number_of_clauses(failed_assertion/7, FailedAssertion),
 	number_of_clauses(blocked/4, Blocked),
 	number_of_clauses(sto/4, STO),
 	(   Passed+Failed+FailedAssertion+Blocked+STO =:= 0
@@ -1157,7 +1213,7 @@ report_failed :-
 	info(plunit(failed(0))).
 
 report_failed_assertions :-
-	number_of_clauses(failed_assertion/4, N),
+	number_of_clauses(failed_assertion/7, N),
 	N > 0, !,
 	info(plunit(failed_assertion(N))),
 	fail.
@@ -1286,6 +1342,9 @@ locationprefix(unit(Unit)) --> !,
 locationprefix(FileLine) -->
 	{ throw_error(type_error(locationprefix,FileLine), _) }.
 
+:- discontiguous
+	message//1.
+
 message(error(context_error(plunit_close(Name, -)), _)) -->
 	[ 'PL-Unit: cannot close unit ~w: no open unit'-[Name] ].
 message(error(context_error(plunit_close(Name, Start)), _)) -->
@@ -1361,13 +1420,40 @@ message(plunit(fixme(Failed,Passed,0))) -->
 	[ 'FIXME: ~D failed; ~D passed'-[Failed, Passed] ].
 message(plunit(fixme(Failed,Passed,Nondet))) -->
 	{ TotalPassed is Passed+Nondet },
-	[ 'FIXME: ~D failed; ~D passed; (~D nondet)'-[Failed, TotalPassed, Nondet] ].
+	[ 'FIXME: ~D failed; ~D passed; (~D nondet)'-
+	  [Failed, TotalPassed, Nondet] ].
 message(plunit(failed(Unit, Name, Line, Failure))) -->
        { unit_file(Unit, File) },
        locationprefix(File:Line),
        test_name(Name),
        [': '-[] ],
        failure(Failure).
+:- if(swi).
+message(plunit(failed_assertion(Unit, Name, Line, AssertLoc,
+				_STO, Reason, Goal))) -->
+       { unit_file(Unit, File) },
+       locationprefix(File:Line),
+       test_name(Name),
+       [ ': assertion'-[] ],
+       assertion_location(AssertLoc),
+       assertion_reason(Reason),
+       assertion_goal(Goal).
+
+assertion_location(File:Line) -->
+	[ ' at ~w:~w'-[File, Line] ].
+assertion_location(unknown) -->
+	[].
+
+assertion_reason(fail) --> !,
+	[ ' failed'-[] ].
+assertion_reason(Error) -->
+	{ message_to_string(Error, String) },
+	[ ' raised "~w"'-[String] ].
+
+assertion_goal(Goal) -->
+	[ ' (~p)'-[Goal] ].
+
+:- endif.
 					% Setup/condition errors
 message(plunit(error(Where, Context, Exception))) -->
 	locationprefix(Context),
