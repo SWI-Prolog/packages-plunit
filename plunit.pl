@@ -1441,13 +1441,15 @@ message(plunit(failed_assertion(Unit, Name, Line, AssertLoc,
        locationprefix(File:Line),
        test_name(Name),
        [ ': assertion'-[] ],
-       assertion_location(AssertLoc),
-       assertion_reason(Reason), [nl],
-       assertion_goal(Goal).
+       assertion_location(AssertLoc, File),
+       assertion_reason(Reason), ['\n\t'],
+       assertion_goal(Unit, Goal).
 
-assertion_location(File:Line) -->
+assertion_location(File:Line, File) -->
+	[ ' at line ~w'-[Line] ].
+assertion_location(File:Line, _) -->
 	[ ' at ~w:~w'-[File, Line] ].
-assertion_location(unknown) -->
+assertion_location(unknown, _) -->
 	[].
 
 assertion_reason(fail) --> !,
@@ -1456,8 +1458,21 @@ assertion_reason(Error) -->
 	{ message_to_string(Error, String) },
 	[ ' raised "~w"'-[String] ].
 
-assertion_goal(Goal) -->
-	[ ' (~p)'-[Goal] ].
+assertion_goal(Unit, Goal) -->
+	{ unit_module(Unit, Module),
+	  unqualify(Goal, Module, Plain)
+	},
+	[ 'Assertion: ~p'-[Plain] ].
+
+unqualify(Var, _, Var) :-
+	var(Var), !.
+unqualify(M:Goal, Unit, Goal) :-
+	nonvar(M),
+	unit_module(Unit, M), !.
+unqualify(M:Goal, _, Goal) :-
+	callable(Goal),
+	predicate_property(M:Goal, imported_from(system)), !.
+unqualify(Goal, _, Goal).
 
 :- endif.
 					% Setup/condition errors
