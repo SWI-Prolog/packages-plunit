@@ -707,7 +707,8 @@ test_assertion_failed(Reason, Goal) :-
 
 assertion_location(Stack, File:Line) :-
 	append(_, [AssertFrame,CallerFrame|_], Stack),
-	prolog_stack_frame_property(AssertFrame, predicate(debug:assertion/1)), !,
+	prolog_stack_frame_property(AssertFrame,
+				    predicate(prolog_debug:assertion/1)), !,
 	prolog_stack_frame_property(CallerFrame, location(File:Line)).
 
 report_failed_assertion(Unit, Test, Line, AssertLoc,
@@ -1441,7 +1442,7 @@ message(plunit(failed_assertion(Unit, Name, Line, AssertLoc,
        test_name(Name),
        [ ': assertion'-[] ],
        assertion_location(AssertLoc),
-       assertion_reason(Reason),
+       assertion_reason(Reason), [nl],
        assertion_goal(Goal).
 
 assertion_location(File:Line) -->
