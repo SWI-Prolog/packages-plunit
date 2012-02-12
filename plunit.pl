@@ -33,6 +33,8 @@ please visit http://www.swi-prolog.org/pldoc/package/plunit.html.
 */
 
 :- use_module(library(maplist)).
+:- meta_predicate valid_options(+, 1).
+
 
 		 /*******************************
 		 *    CONDITIONAL COMPILATION	*
@@ -253,7 +255,7 @@ begin_tests(Unit, Name, File:Line, Options) :-
 	    assert(current_unit(Unit, Name, Context, Options))
 	),
 	'$set_source_module'(Old, Name),
-	'$declare_module'(Name, Context, File, Line, false),
+	'$declare_module'(Name, test, Context, File, Line, false),
 	discontiguous(Name:'unit test'/4),
 	'$set_predicate_attribute'(Name:'unit test'/4, trace, 0),
 	discontiguous(Name:'unit body'/2),
@@ -261,11 +263,6 @@ begin_tests(Unit, Name, File:Line, Options) :-
 begin_tests(Unit, Name, File:_Line, _Options) :-
 	'$set_source_module'(Old, Old),
 	asserta(loading_unit(Unit, Name, File, Old)).
-
-set_import_modules(Module, Imports) :-
-	findall(I, import_module(Module, I), IL),
-	forall(member(I, IL), delete_import_module(Module, I)),
-	forall(member(I, Imports), add_import_module(Module, I, end)).
 
 :- else.
 
@@ -511,6 +508,7 @@ test_set_option(sto(V)) :-
 :- thread_local
 	passed/5,			% Unit, Test, Line, Det, Time
 	failed/4,			% Unit, Test, Line, Reason
+	failed_assertion/7,		% Unit, Test, Line, ALoc, STO, Reason, Goal
 	blocked/4,			% Unit, Test, Line, Reason
 	sto/4,				% Unit, Test, Line, Results
 	fixme/5.			% Unit, Test, Line, Reason, Status
@@ -520,19 +518,35 @@ test_set_option(sto(V)) :-
 
 %%	run_tests is semidet.
 %%	run_tests(+TestSet) is semidet.
+%
+%	Run  tests  and  report  about    the   results.  The  predicate
+%	run_tests/0 runs all known  tests  that   are  not  blocked. The
+%	predicate run_tests/1 takes a  specification   of  tests to run.
+%	This  is  either  a  single   specification    or   a   list  of
+%	specifications. Each single specification is  either the name of
+%	a test-unit or a term <test-unit>:<test>, denoting a single test
+%	within a unit.
 
 run_tests :-
 	cleanup,
-	forall(current_test_set(Set),
-	       run_unit(Set)),
-	report,
-	cleanup_after_test.
+	setup_call_cleanup(
+	    setup_trap_assertions(Ref),
+	    forall(current_test_set(Set),
+		   run_unit(Set)),
+	    ( cleanup_trap_assertions(Ref),
+	      report,
+	      cleanup_after_test
+	    )).
 
 run_tests(Set) :-
 	cleanup,
-	run_unit(Set),
-	report,
-	cleanup_after_test.
+	setup_call_cleanup(
+	    setup_trap_assertions(Ref),
+	    run_unit(Set),
+	    ( cleanup_trap_assertions(Ref),
+	      report,
+	      cleanup_after_test
+	    )).
 
 run_unit([]) :- !.
 run_unit([H|T]) :- !,
@@ -579,6 +593,7 @@ cleanup :-
 	thread_self(Me),
 	retractall(passed(_, _, _, _, _)),
 	retractall(failed(_, _, _, _)),
+	retractall(failed_assertion(_, _, _, _, _, _, _)),
 	retractall(blocked(_, _, _, _)),
 	retractall(sto(_, _, _, _)),
 	retractall(fixme(_, _, _, _, _)),
@@ -667,6 +682,59 @@ unification_capability(_) :-
 :- endif.
 :- endif.
 
+		 /*******************************
+		 *	ASSERTION HANDLING	*
+		 *******************************/
+
+:- if(swi).
+
+:- dynamic prolog:assertion_failed/2.
+
+setup_trap_assertions(Ref) :-
+	asserta((prolog:assertion_failed(Reason, Goal) :-
+			test_assertion_failed(Reason, Goal)),
+		Ref).
+
+cleanup_trap_assertions(Ref) :-
+	erase(Ref).
+
+test_assertion_failed(Reason, Goal) :-
+	thread_self(Me),
+	running(Unit, Test, Line, STO, Me),
+	(   catch(get_prolog_backtrace(10, Stack), _, fail),
+	    assertion_location(Stack, AssertLoc)
+	->  true
+	;   AssertLoc = unknown
+	),
+	current_test_flag(test_options, Options),
+	report_failed_assertion(Unit, Test, Line, AssertLoc,
+				STO, Reason, Goal, Options),
+	assert_cyclic(failed_assertion(Unit, Test, Line, AssertLoc,
+				       STO, Reason, Goal)).
+
+assertion_location(Stack, File:Line) :-
+	append(_, [AssertFrame,CallerFrame|_], Stack),
+	prolog_stack_frame_property(AssertFrame,
+				    predicate(prolog_debug:assertion/1)), !,
+	prolog_stack_frame_property(CallerFrame, location(File:Line)).
+
+report_failed_assertion(Unit, Test, Line, AssertLoc,
+			STO, Reason, Goal, _Options) :-
+	print_message(
+	    error,
+	    plunit(failed_assertion(Unit, Test, Line, AssertLoc,
+				    STO, Reason, Goal))).
+
+:- else.
+
+setup_trap_assertions(_).
+cleanup_trap_assertions(_).
+
+:- endif.
+
+
+
+
 
 		 /*******************************
 		 *	   RUNNING A TEST	*
@@ -688,7 +756,10 @@ run_test(Unit, Name, Line, Options, Body) :-
 run_test_once(Unit, Name, Line, Options, Body) :-
 	current_test_flag(test_options, GlobalOptions),
 	option(sto(false), GlobalOptions, false), !,
+	current_unification_capability(Type),
+	begin_test(Unit, Name, Line, Type),
 	run_test_6(Unit, Name, Line, Options, Body, Result),
+	end_test(Unit, Name, Line, Type),
 	report_result(Result, Options).
 run_test_once(Unit, Name, Line, Options, Body) :-
 	current_unit(Unit, _Module, _Supers, UnitOptions),
@@ -706,7 +777,9 @@ run_test_cap(Unit, Name, Line, Options, Body) :-
 	(   option(sto(Type), Options)
 	->  unification_capability(Type),
 	    set_unification_capability(Type),
+	    begin_test(Unit, Name, Line, Type),
 	    run_test_6(Unit, Name, Line, Options, Body, Result),
+	    end_test(Unit, Name, Line, Type),
 	    report_result(Result, Options)
 	;   findall(Key-(Type+Result),
 		    test_caps(Type, Unit, Name, Line, Options, Body, Result, Key),
@@ -1109,16 +1182,18 @@ running_tests(Running) :-
 report :-
 	number_of_clauses(passed/5, Passed),
 	number_of_clauses(failed/4, Failed),
+	number_of_clauses(failed_assertion/7, FailedAssertion),
 	number_of_clauses(blocked/4, Blocked),
 	number_of_clauses(sto/4, STO),
-	(   Passed+Failed+Blocked+STO =:= 0
+	(   Passed+Failed+FailedAssertion+Blocked+STO =:= 0
 	->  info(plunit(no_tests))
-	;   Failed+Blocked+STO =:= 0
+	;   Failed+FailedAssertion+Blocked+STO =:= 0
 	->  report_fixme,
 	    info(plunit(all_passed(Passed)))
 	;   report_blocked,
 	    report_fixme,
 	    report_failed,
+	    report_failed_assertions,
 	    report_sto
 	).
 
@@ -1149,6 +1224,14 @@ report_failed :-
 	fail.
 report_failed :-
 	info(plunit(failed(0))).
+
+report_failed_assertions :-
+	number_of_clauses(failed_assertion/7, N),
+	N > 0, !,
+	info(plunit(failed_assertions(N))),
+	fail.
+report_failed_assertions :-
+	info(plunit(failed_assertions(0))).
 
 report_sto :-
 	number_of_clauses(sto/4, N),
@@ -1272,6 +1355,9 @@ locationprefix(unit(Unit)) --> !,
 locationprefix(FileLine) -->
 	{ throw_error(type_error(locationprefix,FileLine), _) }.
 
+:- discontiguous
+	message//1.
+
 message(error(context_error(plunit_close(Name, -)), _)) -->
 	[ 'PL-Unit: cannot close unit ~w: no open unit'-[Name] ].
 message(error(context_error(plunit_close(Name, Start)), _)) -->
@@ -1329,6 +1415,12 @@ message(plunit(failed(1))) --> !,
 	[ '1 test failed'-[] ].
 message(plunit(failed(N))) -->
 	[ '~D tests failed'-[N] ].
+message(plunit(failed_assertions(0))) --> !,
+	[].
+message(plunit(failed_assertions(1))) --> !,
+	[ '1 assertion failed'-[] ].
+message(plunit(failed_assertions(N))) -->
+	[ '~D assertions failed'-[N] ].
 message(plunit(sto(0))) --> !,
 	[].
 message(plunit(sto(N))) -->
@@ -1341,13 +1433,55 @@ message(plunit(fixme(Failed,Passed,0))) -->
 	[ 'FIXME: ~D failed; ~D passed'-[Failed, Passed] ].
 message(plunit(fixme(Failed,Passed,Nondet))) -->
 	{ TotalPassed is Passed+Nondet },
-	[ 'FIXME: ~D failed; ~D passed; (~D nondet)'-[Failed, TotalPassed, Nondet] ].
+	[ 'FIXME: ~D failed; ~D passed; (~D nondet)'-
+	  [Failed, TotalPassed, Nondet] ].
 message(plunit(failed(Unit, Name, Line, Failure))) -->
        { unit_file(Unit, File) },
        locationprefix(File:Line),
        test_name(Name),
        [': '-[] ],
        failure(Failure).
+:- if(swi).
+message(plunit(failed_assertion(Unit, Name, Line, AssertLoc,
+				_STO, Reason, Goal))) -->
+       { unit_file(Unit, File) },
+       locationprefix(File:Line),
+       test_name(Name),
+       [ ': assertion'-[] ],
+       assertion_location(AssertLoc, File),
+       assertion_reason(Reason), ['\n\t'],
+       assertion_goal(Unit, Goal).
+
+assertion_location(File:Line, File) -->
+	[ ' at line ~w'-[Line] ].
+assertion_location(File:Line, _) -->
+	[ ' at ~w:~w'-[File, Line] ].
+assertion_location(unknown, _) -->
+	[].
+
+assertion_reason(fail) --> !,
+	[ ' failed'-[] ].
+assertion_reason(Error) -->
+	{ message_to_string(Error, String) },
+	[ ' raised "~w"'-[String] ].
+
+assertion_goal(Unit, Goal) -->
+	{ unit_module(Unit, Module),
+	  unqualify(Goal, Module, Plain)
+	},
+	[ 'Assertion: ~p'-[Plain] ].
+
+unqualify(Var, _, Var) :-
+	var(Var), !.
+unqualify(M:Goal, Unit, Goal) :-
+	nonvar(M),
+	unit_module(Unit, M), !.
+unqualify(M:Goal, _, Goal) :-
+	callable(Goal),
+	predicate_property(M:Goal, imported_from(system)), !.
+unqualify(Goal, _, Goal).
+
+:- endif.
 					% Setup/condition errors
 message(plunit(error(Where, Context, Exception))) -->
 	locationprefix(Context),
@@ -1521,7 +1655,7 @@ user:generate_message_hook(Message) -->
 	message(Message),
 	[nl].				% SICStus requires nl at the end
 
-%	user:message_hook(+Severity, +Message, +Lines) is semidet.
+%%	user:message_hook(+Severity, +Message, +Lines) is semidet.
 %
 %	Redefine printing some messages. It appears   SICStus has no way
 %	to get multiple messages at the same   line, so we roll our own.

@@ -17,8 +17,8 @@
 
 \title{Prolog Unit Tests}
 \author{Jan Wielemaker \\
-	HCS, \\
 	University of Amsterdam \\
+	VU University Amsterdam \\
 	The Netherlands \\
 	E-mail: \email{jan@swi-prolog.org}}
 
@@ -372,6 +372,65 @@ test(div0, [error(evaluation_error(zero_divisor))]) :-
 \end{code}
 
 
+\subsubsection{One body with multiple tests using assertions}
+\label{sec:testassertion}
+
+PlUnit is designed to cooperate with the assertion/1 test provided by
+library(debug).\footnote{This integration was suggested by G\"unter
+Kniesel.} If an assertion fails in the context of a test, the test
+framework reports this and considers the test failed, but does not trap
+the debugger. Using assertion/1 in the test-body is attractive for two
+scenarios:
+
+\begin{itemize}
+    \item Confirm that multiple claims hold.  Where multiple claims
+	  about variable bindings can be tested using the == option
+	  in the test header, arbitrary boolean tests, notably about
+	  the state of the database, are harder to combine.  Simply
+	  adding them in the body of the test has two disadvantages:
+	  it is less obvious to distinguish the tested code from the
+	  test and if one of the tests fails there is no easy way to
+	  find out which one.
+    \item Testing `scenarios' or sequences of actions.  If one step
+          in such a sequence fails there is again no easy way to find
+	  out which one.  By inserting assertions into the sequence
+	  this becomes obvious.
+\end{itemize}
+
+Below is a simple example, showing two failing assertions. The first
+line of the failure message gives the test. The second reports the
+location of the assertion.\footnote{If known. The location is determined
+by analysing the stack. The second failure shows a case where this does
+not work because last-call optimization has already removed the context
+of the test-body.} If the assertion call originates from a different
+file this is reported appropriately. The last line gives the actually
+failed goal.
+
+\begin{code}
+:- begin_tests(test).
+
+test(a) :-
+	A is 2^3,
+	assertion(float(A)),
+	assertion(A == 9).
+
+:- end_tests(test).
+\end{code}
+
+\begin{code}
+?- run_tests.
+% PL-Unit: test
+ERROR: /home/jan/src/pl-devel/linux/t.pl:5:
+	test a: assertion at line 7 failed
+	Assertion: float(8)
+ERROR: /home/jan/src/pl-devel/linux/t.pl:5:
+	test a: assertion failed
+	Assertion: 8==9
+. done
+% 2 assertions failed
+\end{code}
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Using separate test files}
 \label{sec:testfiles}
@@ -630,7 +689,7 @@ The current version runs under SICStus 3.  Open issues:
           all ISO errors as instantiation errors.
 
     \item Only \file{plunit.pl}.  Both coverage analysis and the test
-    	  generation wizard currently require SWI-Prolog.
+	  generation wizard currently require SWI-Prolog.
 
     \item The \const{load} option \const{normal} is the same as \const{always}.
 	  Use \exam{set_test_options(load, never)} to avoid loading the
