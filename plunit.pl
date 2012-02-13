@@ -102,6 +102,9 @@ set_test_flag(Name, Value) :-
 :- if(current_prolog_flag(dialect, yap)).
 
 '$set_predicate_attribute'(_, _, _).
+
+'$declare_module'(_Name, _test, _Context, _File, _Line, _false).
+
 :- endif.
 :- endif.
 
