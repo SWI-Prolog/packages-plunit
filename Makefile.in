@@ -18,7 +18,7 @@ all:
 install:	$(addprefix $(srcdir)/, $(LIBPL))
 		mkdir -p $(DESTDIR)$(PLLIBDIR)
 		$(INSTALL_DATA) $(addprefix $(srcdir)/, $(LIBALL)) $(DESTDIR)$(PLLIBDIR)
-		$(PL) -f none -g make -t halt
+		$(MKINDEX)
 
 ln-install:	$(addprefix $(srcdir)/, $(LIBPL))
 		mkdir -p $(DESTDIR)$(PLLIBDIR)
@@ -26,7 +26,7 @@ ln-install:	$(addprefix $(srcdir)/, $(LIBPL))
 		    rm -f $(DESTDIR)$(PLLIBDIR)/$$f; \
 		    ln -s $(srcdir)/$$f $(DESTDIR)$(PLLIBDIR); \
 		done
-		$(PL) -f none -g make -t halt
+		$(MKINDEX)
 
 rpm-install:	install
 
