@@ -946,7 +946,7 @@ nondet_test(Expected, Unit, Name, Line, Options, Body, Result) :-
 		    Time is (T1 - T0)/1000.0,
 		    (   nondet_compare(Expected, Bindings, Unit, Name, Line)
 		    ->  Result = success(Unit, Name, Line, true, Time)
-		    ;   Result = failure(Unit, Name, Line, wrong_answer)
+		    ;   Result = failure(Unit, Name, Line, wrong_answer(Expected, Bindings))
 		    ),
 		    cleanup(Module, Options)
 		;   Result = failure(Unit, Name, Line, E),
@@ -1607,6 +1607,21 @@ failure(wrong_answer(Cmp)) -->
 	},
 	[ 'wrong answer (compared using ~w)'-[Op], nl ],
 	expected_got_ops_(Ex, A, OPS, Goals).
+failure(wrong_answer(CmpExpected, Bindings)) -->
+	{ (   CmpExpected = all(Cmp)
+	  ->  Cmp =.. [Op,_,Expected],
+	      Got = Bindings,
+	      Type = all
+	  ;   CmpExpected = set(Cmp),
+	      Cmp =.. [Op,_,Expected0],
+	      sort(Expected0, Expected),
+	      sort(Bindings, Got),
+	      Type = set
+	  )
+	},
+	[ 'wrong "~w" answer:'-[Type] ],
+	[ nl, '    Expected: ~q'-[Expected] ],
+	[ nl, '       Found: ~q'-[Got] ].
 :- if(swi).
 failure(cmp_error(_Cmp, Error)) -->
 	{ message_to_string(Error, Message) },
