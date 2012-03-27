@@ -1,14 +1,34 @@
-/*  $Id$
-
-    Part of SWI-Prolog
+/*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker
-    E-mail:        wielemak@science.uva.nl
+    E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 1985-2006, University of Amsterdam
+    Copyright (C): 2006-2012, University of Amsterdam
+			      VU University Amsterdam
 
-    This file is covered by the `The Artistic License', also in use by
-    Perl.  See http://www.perl.com/pub/a/language/misc/Artistic.html
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+
+    As a special exception, if you link this library with other files,
+    compiled with a Free Software compiler, to produce an executable, this
+    library does not by itself cause the resulting executable to be covered
+    by the GNU General Public License. This exception does not however
+    invalidate any other reasons why the executable file might be covered by
+    the GNU General Public License.
+
+    Alternatively, this program may be distributed under the Perl
+    Artistic License, version 2.0.
 */
 
 :- module(swi,
@@ -47,7 +67,7 @@ PlUnit environment in SICStus. Tested and  developed with SICStus Prolog
 3.12.7.
 
 @author		Jan Wielemaker
-@license	artistic
+@license	GPL+SWI-exception or Artistic 2.0
 */
 
 %% copy_term(+Term,?Copy, Goals)
