@@ -544,10 +544,11 @@ run_tests :-
 	cleanup,
 	setup_call_cleanup(
 	    setup_trap_assertions(Ref),
-	    forall(current_test_set(Set),
-		   run_unit(Set)),
+	    ( forall(current_test_set(Set),
+		     run_unit(Set)),
+	      report
+	    ),
 	    ( cleanup_trap_assertions(Ref),
-	      report,
 	      cleanup_after_test
 	    )).
 
@@ -555,9 +556,10 @@ run_tests(Set) :-
 	cleanup,
 	setup_call_cleanup(
 	    setup_trap_assertions(Ref),
-	    run_unit(Set),
+	    ( run_unit(Set),
+	      report
+	    ),
 	    ( cleanup_trap_assertions(Ref),
-	      report,
 	      cleanup_after_test
 	    )).
 
@@ -1207,7 +1209,8 @@ report :-
 	    report_fixme,
 	    report_failed,
 	    report_failed_assertions,
-	    report_sto
+	    report_sto,
+	    Failed+FailedAssertion+STO =:= 0     % fail on errors
 	).
 
 number_of_clauses(F/A,N) :-
@@ -1232,27 +1235,15 @@ report_blocked.
 
 report_failed :-
 	number_of_clauses(failed/4, N),
-	N > 0, !,
-	info(plunit(failed(N))),
-	fail.
-report_failed :-
-	info(plunit(failed(0))).
+	info(plunit(failed(N))).
 
 report_failed_assertions :-
 	number_of_clauses(failed_assertion/7, N),
-	N > 0, !,
-	info(plunit(failed_assertions(N))),
-	fail.
-report_failed_assertions :-
-	info(plunit(failed_assertions(0))).
+	info(plunit(failed_assertions(N))).
 
 report_sto :-
 	number_of_clauses(sto/4, N),
-	N > 0, !,
-	info(plunit(sto(N))),
-	fail.
-report_sto :-
-	info(plunit(sto(0))).
+	info(plunit(sto(N))).
 
 report_fixme :-
 	report_fixme(_,_,_).
