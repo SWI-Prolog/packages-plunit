@@ -1,11 +1,10 @@
-/*  $Id$
-
-    Part of SWI-Prolog
+/*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker
-    E-mail:        wielemak@science.uva.nl
+    E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 1985-2006, University of Amsterdam
+    Copyright (C): 2006-2012, University of Amsterdam
+			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -30,8 +29,7 @@
 */
 
 :- module(prolog_cover,
-	  [ show_coverage/1,		% :Goal
-	    covered_clauses/4		% +Goal, -Result, -Succeeded, -Failed
+	  [ show_coverage/1		% :Goal
 	  ]).
 :- use_module(library(ordsets)).
 
@@ -49,7 +47,7 @@ hooks and collects the results, after   which  it restores the debugging
 environment.  This has some limitations:
 
 	* The performance degrades significantly (about 10 times)
-	* It is not possible to use the debugger using coverage analysis
+	* It is not possible to use the debugger during coverage analysis
 	* The cover analysis tool is currently not thread-safe.
 
 The result is  represented  as  a   list  of  clause-references.  As the
@@ -61,6 +59,8 @@ are omitted from the result.
 	to do 100% complete meta-interpretation of Prolog.  Example
 	problem areas include handling cuts in control-structures
 	and calls from non-interpreted meta-predicates.
+@tbd	Provide detailed information organised by predicate.  Possibly
+	annotate the source with coverage information.
 */
 
 
@@ -68,63 +68,41 @@ are omitted from the result.
 	entered/1,			% clauses entered
 	exited/1.			% clauses completed
 
-:- module_transparent
-	covering/1,
-	covering/4.
+:- meta_predicate
+	show_coverage(0).
 
-%%	show_coverage(Goal)
+%%	show_coverage(:Goal)
 %
-%	Report on coverage by Goal
+%	Report on coverage by Goal.  Goal is executed as in once/1.
 
 show_coverage(Goal) :-
-	covered_clauses(Goal, Result, Succeeded, Failed),
-	file_coverage(Succeeded, Failed),
-	return(Result).
+	setup_call_cleanup(
+	    setup_trace(State),
+	    once(Goal),
+	    cleanup_trace(State)).
 
-return(true).
-return(fail) :- !, fail.
-return(error(E)) :-
-	throw(E).
-
-%%	covered_clauses(:Goal, -Result, -Succeeded, -Failed) is det.
-%
-%	Run Goal as once/1. Unify Result with   one of =true=, =fail= or
-%	error(Error).
-%
-%	@param	Succeeded Ordered set of succeeded clauses
-%	@param	Failed	  Ordered set of clauses that are entered but
-%			  never succeeded.
-
-covered_clauses(Goal, Result, Succeeded, Failed) :-
-	asserta(user:prolog_trace_interception(Port, Frame, _, continue) :-
-			prolog_cover:assert_cover(Port, Frame), Ref),
+setup_trace(state(Visible, Leash, Ref)) :-
+	asserta((user:prolog_trace_interception(Port, Frame, _, continue) :-
+			prolog_cover:assert_cover(Port, Frame)), Ref),
 	port_mask([unify,exit], Mask),
-	'$visible'(V, Mask),
-	'$leash'(L, Mask),
-	trace,
-	call_with_result(Goal, Result),
-	set_prolog_flag(debug, false),
-	covered(Ref, V, L, Succeeded, Failed).
-
-%%	call_with_result(:Goal, -Result) is det.
-%
-%	Run Goal as once/1. Unify Result with   one of =true=, =fail= or
-%	error(Error).
-
-call_with_result(Goal, Result) :-
-	(   catch(Goal, E, true)
-	->  (   var(E)
-	    ->	Result = true
-	    ;	Result = error(E)
-	    )
-	;   Result = false
-	).
+	'$visible'(Visible, Mask),
+	'$leash'(Leash, Mask),
+	trace.
 
 port_mask([], 0).
 port_mask([H|T], Mask) :-
 	port_mask(T, M0),
-	'$syspreds':'$port_bit'(H, Bit),	% Private stuff
+	'$syspreds':port_name(H, Bit),
 	Mask is M0 \/ Bit.
+
+cleanup_trace(state(Visible, Leash, Ref)) :-
+	nodebug,
+	'$visible'(_, Visible),
+	'$leash'(_, Leash),
+	erase(Ref),
+	covered(Succeeded, Failed),
+	file_coverage(Succeeded, Failed).
+
 
 %%	assert_cover(+Port, +Frame) is det.
 %
@@ -169,10 +147,7 @@ assert_exited(Cl) :-
 %
 %	Restore state and collect failed and succeeded clauses.
 
-covered(Ref, V, L, Succeeded, Failed) :-
-	'$visible'(_, V),
-	'$leash'(_, L),
-	erase(Ref),
+covered(Succeeded, Failed) :-
 	findall(Cl, (entered(Cl), \+exited(Cl)), Failed0),
 	findall(Cl, retract(exited(Cl)), Succeeded0),
 	retractall(entered(Cl)),
