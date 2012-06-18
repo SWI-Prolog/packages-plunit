@@ -552,8 +552,10 @@ run_tests :-
 	cleanup,
 	setup_call_cleanup(
 	    setup_trap_assertions(Ref),
-	    forall(current_test_set(Set),
-		   run_unit(Set)),
+	    ( forall(current_test_set(Set),
+		     run_unit(Set)),
+	      check_for_test_errors
+	    ),
 	    ( cleanup_trap_assertions(Ref),
 	      report,
 	      cleanup_after_test
@@ -563,7 +565,9 @@ run_tests(Set) :-
 	cleanup,
 	setup_call_cleanup(
 	    setup_trap_assertions(Ref),
-	    run_unit(Set),
+	    ( run_unit(Set),
+	      check_for_test_errors
+	    ),
 	    ( cleanup_trap_assertions(Ref),
 	      report,
 	      cleanup_after_test
@@ -1195,10 +1199,20 @@ running_tests(Running) :-
 		), Running).
 
 
-%%	report is semidet.
+%%	check_for_test_errors is semidet.
 %
-%	True if there are no errors.  If errors were encountered, report
-%	them to current output and fail.
+%	True if there are no errors, otherwise false.
+
+check_for_test_errors :-
+	number_of_clauses(failed/4, Failed),
+	number_of_clauses(failed_assertion/7, FailedAssertion),
+	number_of_clauses(sto/4, STO),
+	Failed+FailedAssertion+STO =:= 0.     % fail on errors
+
+
+%%	report is det.
+%
+%	Print a summary of the tests that ran.
 
 report :-
 	number_of_clauses(passed/5, Passed),
@@ -1240,27 +1254,15 @@ report_blocked.
 
 report_failed :-
 	number_of_clauses(failed/4, N),
-	N > 0, !,
-	info(plunit(failed(N))),
-	fail.
-report_failed :-
-	info(plunit(failed(0))).
+	info(plunit(failed(N))).
 
 report_failed_assertions :-
 	number_of_clauses(failed_assertion/7, N),
-	N > 0, !,
-	info(plunit(failed_assertions(N))),
-	fail.
-report_failed_assertions :-
-	info(plunit(failed_assertions(0))).
+	info(plunit(failed_assertions(N))).
 
 report_sto :-
 	number_of_clauses(sto/4, N),
-	N > 0, !,
-	info(plunit(sto(N))),
-	fail.
-report_sto :-
-	info(plunit(sto(0))).
+	info(plunit(sto(N))).
 
 report_fixme :-
 	report_fixme(_,_,_).
