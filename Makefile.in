@@ -7,6 +7,8 @@
 PACKAGE=plunit
 include ../Makefile.defs
 
+EXDIR=$(PKGEXDIR)/plunit
+
 
 LIBPL=		plunit.pl test_wizard.pl test_cover.pl
 LIBALL=		$(LIBPL) $(SUPPORT)
@@ -38,7 +40,7 @@ html-install:	install-examples
 
 install-examples::
 		mkdir -p $(DESTDIR)$(EXDIR)
-		(cd examples && $(INSTALL_DATA) $(EXAMPLES) $(DESTDIR)$(EXDIR))
+		(cd $(srcdir)/examples && $(INSTALL_DATA) $(EXAMPLES) $(DESTDIR)$(EXDIR))
 
 uninstall::
 		rm -f $(LIBDIR)/plunit.pl
