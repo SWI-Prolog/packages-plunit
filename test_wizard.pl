@@ -202,9 +202,9 @@ open_query_log(Out) :-
 	       bom(true)
 	     ]),
 	format(Out,
-	       '/* SWI-Prolog query log.  This file contains all syntactically\n   \
-	           correct queries issued in this directory.  It is used by the\n   \
-		   test wizard to generate unit tests.\n\
+	       '/* SWI-Prolog query log.  This file contains all syntactically\n   \c
+	           correct queries issued in this directory.  It is used by the\n   \c
+		   test wizard to generate unit tests.\n\c
 		*/~n~n', []).
 
 
