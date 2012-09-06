@@ -52,7 +52,7 @@ please visit http://www.swi-prolog.org/pldoc/package/plunit.html.
 @license	GPL+SWI-exception or Artistic 2.0
 */
 
-:- use_module(library(maplist)).
+:- use_module(library(apply)).
 :- meta_predicate valid_options(+, 1).
 
 

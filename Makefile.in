@@ -5,6 +5,7 @@
 ################################################################
 
 PACKAGE=plunit
+DOC=plunit
 include ../Makefile.defs
 
 EXDIR=$(PKGEXDIR)/plunit
@@ -14,7 +15,7 @@ LIBPL=		plunit.pl test_wizard.pl test_cover.pl
 LIBALL=		$(LIBPL) $(SUPPORT)
 EXAMPLES=	read.pl simple.pl
 
-all:		
+all:
 		@echo "Nothing to do for this package"
 
 install:	$(addprefix $(srcdir)/, $(LIBPL))
