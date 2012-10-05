@@ -1229,7 +1229,8 @@ report :-
 	    report_fixme,
 	    report_failed,
 	    report_failed_assertions,
-	    report_sto
+	    report_sto,
+	    info(plunit(passed(Passed)))
 	).
 
 number_of_clauses(F/A,N) :-
@@ -1432,6 +1433,10 @@ message(plunit(no_tests)) --> !,
 	[ 'No tests to run' ].
 message(plunit(all_passed(Count))) --> !,
 	[ 'All ~D tests passed'-[Count] ].
+message(plunit(passed(1))) --> !,
+	[ 'test passed'-[] ].
+message(plunit(passed(Count))) --> !,
+	[ '~D tests passed'-[Count] ].
 message(plunit(failed(0))) --> !,
 	[].
 message(plunit(failed(1))) --> !,
