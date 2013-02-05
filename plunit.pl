@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2006-2012, University of Amsterdam
+    Copyright (C): 2006-2013, University of Amsterdam
 			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
@@ -1110,6 +1110,9 @@ success(Unit, Name, Line, Det, _Time, Options) :-
 	),
 	flush_output(user_error),
 	assert(fixme(Unit, Name, Line, Reason, Ok)).
+success(Unit, Name, Line, _, _, Options) :-
+	failed_assertion(Unit, Name, Line, _,_,_,_), !,
+	failure(Unit, Name, Line, assertion, Options).
 success(Unit, Name, Line, Det, Time, Options) :-
 	assert(passed(Unit, Name, Line, Det, Time)),
 	(   (   Det == true
@@ -1227,8 +1230,8 @@ report :-
 	    info(plunit(all_passed(Passed)))
 	;   report_blocked,
 	    report_fixme,
-	    report_failed,
 	    report_failed_assertions,
+	    report_failed,
 	    report_sto,
 	    info(plunit(passed(Passed)))
 	).
@@ -1281,6 +1284,8 @@ fixme(How, Tuples, Count) :-
 	length(Tuples, Count).
 
 
+report_failure(_, _, _, assertion, _) :- !,
+	put_char(user_error, 'A').
 report_failure(Unit, Name, Line, Error, _Options) :-
 	print_message(error, plunit(failed(Unit, Name, Line, Error))).
 
@@ -1431,10 +1436,10 @@ message(plunit(blocked(Pos, Name, Reason))) -->
 					% fail/success
 message(plunit(no_tests)) --> !,
 	[ 'No tests to run' ].
+message(plunit(all_passed(1))) --> !,
+	[ 'test passed' ].
 message(plunit(all_passed(Count))) --> !,
 	[ 'All ~D tests passed'-[Count] ].
-message(plunit(passed(1))) --> !,
-	[ 'test passed'-[] ].
 message(plunit(passed(Count))) --> !,
 	[ '~D tests passed'-[Count] ].
 message(plunit(failed(0))) --> !,
