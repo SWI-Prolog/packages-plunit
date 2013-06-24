@@ -41,7 +41,7 @@ framework. See \secref{sicstus}.
 \newpage
 
 \section{Introduction}
-\label{sec:intro}
+\label{sec:plunit-intro}
 
 There is really no excuse not to write tests!
 
