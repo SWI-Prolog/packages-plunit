@@ -444,7 +444,7 @@ loaded into the current project.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Running the test-suite}
-\label{sec:running}
+\label{sec:pldoc-running}
 
 At any time, the tests can be executed by loading the program and
 running run_tests/0 or run_tests(+Unit).
@@ -706,7 +706,7 @@ The current version runs under SICStus 3.  Open issues:
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Motivation of choices}
-\label{sec:motivation}
+\label{sec:plunit-motivation}
 
 \subsection*{Easy to understand and flexible}
 
