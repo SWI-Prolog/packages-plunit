@@ -220,7 +220,7 @@ set_test_options(Options) :-
 global_test_option(load(Load)) :-
 	must_be(oneof([never,always,normal]), Load).
 global_test_option(run(When)) :-
-	must_be(oneof([manual,make,all]), When).
+	must_be(oneof([manual,make,make(all)]), When).
 global_test_option(silent(Bool)) :-
 	must_be(boolean, Bool).
 global_test_option(sto(Bool)) :-
