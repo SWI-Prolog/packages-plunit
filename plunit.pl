@@ -1629,11 +1629,11 @@ failure(wrong_answer(Cmp)) -->
 	expected_got_ops_(Ex, A, OPS, Goals).
 failure(wrong_answer(CmpExpected, Bindings)) -->
 	{ (   CmpExpected = all(Cmp)
-	  ->  Cmp =.. [Op,_,Expected],
+	  ->  Cmp =.. [_Op1,_,Expected],
 	      Got = Bindings,
 	      Type = all
 	  ;   CmpExpected = set(Cmp),
-	      Cmp =.. [Op,_,Expected0],
+	      Cmp =.. [_Op2,_,Expected0],
 	      sort(Expected0, Expected),
 	      sort(Bindings, Got),
 	      Type = set
