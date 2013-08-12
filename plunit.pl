@@ -53,6 +53,7 @@ please visit http://www.swi-prolog.org/pldoc/package/plunit.html.
 */
 
 :- use_module(library(apply)).
+:- use_module(library(ordsets), [ord_intersection/3]).
 :- meta_predicate valid_options(+, 1).
 
 
@@ -375,7 +376,9 @@ expand_test(Name, Options0, Body,
 	source_location(_File, Line),
 	prolog_load_context(module, Module),
 	atomic_list_concat([Name, '@line ', Line], Id),
-	term_variables(Body, VarList),
+	term_variables(Options0, OptionVars0), sort(OptionVars0, OptionVars),
+	term_variables(Body, BodyVars0), sort(BodyVars0, BodyVars),
+	ord_intersection(OptionVars, BodyVars, VarList),
 	Vars =.. [vars|VarList],
 	(   is_list(Options0)		% allow for single option without list
 	->  Options1 = Options0
