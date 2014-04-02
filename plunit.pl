@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2006-2013, University of Amsterdam
+    Copyright (C): 2006-2014, University of Amsterdam
 			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
@@ -119,6 +119,12 @@ current_test_flag(Name, Value) :-
 
 set_test_flag(Name, Value) :-
 	create_prolog_flag(Name, Value, []).
+
+% ensure expansion to avoid tracing
+goal_expansion(forall(C,A),
+	       \+ (C, \+ A)).
+goal_expansion(current_module(Module,File),
+	       module_property(Module, file(File))).
 
 :- if(current_prolog_flag(dialect, yap)).
 
@@ -555,26 +561,29 @@ run_tests :-
 	cleanup,
 	setup_call_cleanup(
 	    setup_trap_assertions(Ref),
-	    ( forall(current_test_set(Set),
-		     run_unit(Set)),
-	      check_for_test_errors
-	    ),
-	    ( cleanup_trap_assertions(Ref),
-	      report,
-	      cleanup_after_test
-	    )).
+	    run_current_units,
+	    report_and_cleanup(Ref)).
+
+run_current_units :-
+	forall(current_test_set(Set),
+	       run_unit(Set)),
+	check_for_test_errors.
+
+report_and_cleanup(Ref) :-
+	cleanup_trap_assertions(Ref),
+	report,
+	cleanup_after_test.
 
 run_tests(Set) :-
 	cleanup,
 	setup_call_cleanup(
 	    setup_trap_assertions(Ref),
-	    ( run_unit(Set),
-	      check_for_test_errors
-	    ),
-	    ( cleanup_trap_assertions(Ref),
-	      report,
-	      cleanup_after_test
-	    )).
+	    run_unit_and_check_errors(Set),
+	    report_and_cleanup(Ref)).
+
+run_unit_and_check_errors(Set) :-
+	run_unit(Set),
+	check_for_test_errors.
 
 run_unit([]) :- !.
 run_unit([H|T]) :- !,
