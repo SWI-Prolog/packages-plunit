@@ -285,7 +285,7 @@ begin_tests(Unit, Name, File:Line, Options) :-
 	'$set_source_module'(Old, Name),
 	'$declare_module'(Name, test, Context, File, Line, false),
 	discontiguous(Name:'unit test'/4),
-	'$set_predicate_attribute'(Name:'unit test'/4, trace, 0),
+	'$set_predicate_attribute'(Name:'unit test'/4, trace, false),
 	discontiguous(Name:'unit body'/2),
 	asserta(loading_unit(Unit, Name, File, Old)).
 begin_tests(Unit, Name, File:_Line, _Options) :-
