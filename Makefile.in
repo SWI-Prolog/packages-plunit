@@ -1,7 +1,7 @@
 ################################################################
 # SWI-Prolog `PlDoc' package
-# Author:    Jan Wielemaker. wielemak@science.uva.nl
-# Copyright: GPL (see COPYING or www.gnu.org
+# Author:    Jan Wielemaker <J.Wielemaker@vu.nl>
+# Copyright: Simplified BSD license
 ################################################################
 
 PACKAGE=plunit
