@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2006-2012, University of Amsterdam
+    Copyright (c)  2006-2016, University of Amsterdam
                               VU University Amsterdam
     All rights reserved.
 
@@ -219,6 +219,7 @@ clause_source(Clause, File, Line) :-
 	clause_property(Clause, file(File)),
 	clause_property(Clause, line_count(Line)).
 clause_source(Clause, File, Line) :-
+	Pred = _:_,
 	source_file(Pred, File),
 	\+ predicate_property(Pred, multifile),
 	nth_clause(Pred, _Index, Clause),
