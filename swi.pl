@@ -196,7 +196,7 @@ option(Opt, Options, Default) :-        % make option processing stead-fast
     option(Gen, Options, Default),
     Opt = Gen.
 option(Opt, Options, _) :-
-    get_option(Opt, Options), 
+    get_option(Opt, Options),
     !.
 option(Opt, _, Default) :-
     arg(1, Opt, Default).
@@ -219,17 +219,17 @@ option(Opt, Options) :- % make option processing stead-fast
     option(Gen, Options),
     Opt = Gen.
 option(Opt, Options) :-
-    get_option(Opt, Options), 
+    get_option(Opt, Options),
     !.
 
 
 get_option(Opt, Options) :-
-    memberchk(Opt, Options), 
+    memberchk(Opt, Options),
     !.
 get_option(Opt, Options) :-
     functor(Opt, OptName, 1),
     arg(1, Opt, OptVal),
-    memberchk(OptName=OptVal, Options), 
+    memberchk(OptName=OptVal, Options),
     !.
 
 %!  atomic_list_concat(+Atoms:list(atomic), -Atom:atom) is det.

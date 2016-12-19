@@ -95,7 +95,7 @@ if_expansion((:- else), []) :-
     ;   throw_error(context_error(no_if),_)
     ).
 if_expansion((:- endif), []) :-
-    retract(include_code(_)), 
+    retract(include_code(_)),
     !.
 
 if_expansion(_, []) :-
@@ -366,7 +366,7 @@ make_unit_module(Unit, Module) :-
     unit_module_store/2.
 
 unit_module(Unit, Module) :-
-    unit_module_store(Unit, Module), 
+    unit_module_store(Unit, Module),
     !.
 
 make_unit_module(Unit, Module) :-
@@ -520,7 +520,7 @@ verify_options([H|T], Pred) :-
 %   True if Option is a valid option for test(Name, Options).
 
 test_option(Option) :-
-    test_set_option(Option), 
+    test_set_option(Option),
     !.
 test_option(true(_)).
 test_option(fail).
@@ -720,7 +720,7 @@ set_unification_capability(Cap) :-
 
 current_unification_capability(Cap) :-
     current_prolog_flag(occurs_check, Flag),
-    cap_to_flag(Cap, Flag), 
+    cap_to_flag(Cap, Flag),
     !.
 
 cap_to_flag(sto_error_incomplete, error).
@@ -908,7 +908,7 @@ report_sto_results([Type+Result|T], Options) :-
 
 run_test_6(Unit, Name, Line, Options, _Body,
            blocked(Unit, Name, Line, Reason)) :-
-    option(blocked(Reason), Options), 
+    option(blocked(Reason), Options),
     !.
 run_test_6(Unit, Name, Line, Options, Body, Result) :-
     option(all(Answer), Options),                  % all(Bindings)
@@ -1582,15 +1582,15 @@ assertion_goal(Unit, Goal) -->
     [ 'Assertion: ~p'-[Plain] ].
 
 unqualify(Var, _, Var) :-
-    var(Var), 
+    var(Var),
     !.
 unqualify(M:Goal, Unit, Goal) :-
     nonvar(M),
-    unit_module(Unit, M), 
+    unit_module(Unit, M),
     !.
 unqualify(M:Goal, _, Goal) :-
     callable(Goal),
-    predicate_property(M:Goal, imported_from(system)), 
+    predicate_property(M:Goal, imported_from(system)),
     !.
 unqualify(Goal, _, Goal).
 

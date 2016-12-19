@@ -141,13 +141,13 @@ running_static_pred(Frame) :-
 %   Add Ref to the set of entered or exited clauses.
 
 assert_entered(Cl) :-
-    entered(Cl), 
+    entered(Cl),
     !.
 assert_entered(Cl) :-
     assert(entered(Cl)).
 
 assert_exited(Cl) :-
-    exited(Cl), 
+    exited(Cl),
     !.
 assert_exited(Cl) :-
     assert(exited(Cl)).
