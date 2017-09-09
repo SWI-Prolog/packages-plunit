@@ -191,7 +191,7 @@ test(or, all(X == [1,2])) :-
     \termitem{set}{AnswerTerm Cmp Instances}
 Similar to \term{all}{AnswerTerm Cmp Instances}, but before testing both
 the bindings of \arg{AnswerTerm} and \arg{Instances} are sorted using
-sort/2. This removes duplicates and places both set in the same
+sort/2. This removes duplicates and places both sets in the same
 order.\footnote{The result is only well-defined of \arg{Cmp} is
 \texttt{==}.}
 
