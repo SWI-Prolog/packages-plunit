@@ -26,10 +26,10 @@
 
 \begin{abstract}
 This document describes a Prolog unit-test framework. This framework was
-initially developed for \url[SWI-Prolog]{http://www.swi-prolog.org}. The
-current version also runs on \url[SICStus
-Prolog]{http://www.sics.se/sicstus/}, providing a portable testing
-framework. See \secref{sicstus}.
+initially developed for \href{http://www.swi-prolog.org}{SWI-Prolog}.
+The current version also runs on
+\href{http://www.sics.se/sicstus/}{SICStus Prolog}, providing a portable
+testing framework. See \secref{sicstus}.
 \end{abstract}
 
 \pagebreak
