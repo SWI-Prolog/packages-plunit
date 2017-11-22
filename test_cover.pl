@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2006-2016, University of Amsterdam
+    Copyright (c)  2006-2017, University of Amsterdam
                               VU University Amsterdam
     All rights reserved.
 
@@ -34,9 +34,11 @@
 */
 
 :- module(prolog_cover,
-          [ show_coverage/1             % :Goal
+          [ show_coverage/1,            % :Goal
+            show_coverage/2
           ]).
 :- use_module(library(ordsets)).
+:- use_module(library(apply)).
 
 :- set_prolog_flag(generate_debug_info, false).
 
@@ -74,17 +76,23 @@ are omitted from the result.
     exited/1.                       % clauses completed
 
 :- meta_predicate
-    show_coverage(0).
+    show_coverage(0),
+    show_coverage(0,+).
 
-%!  show_coverage(:Goal)
+%!  show_coverage(:Goal) is semidet.
+%!  show_coverage(:Goal, +Modules:list(atom)) is semidet.
 %
-%   Report on coverage by Goal.  Goal is executed as in once/1.
+%   Report on coverage by Goal. Goal is   executed  as in once/1. Report
+%   the details of the uncovered clauses  for   each  module in the list
+%   Modules
 
 show_coverage(Goal) :-
+    show_coverage(Goal, []).
+show_coverage(Goal, Modules):-
     setup_call_cleanup(
         setup_trace(State),
         once(Goal),
-        cleanup_trace(State)).
+        cleanup_trace(State, Modules)).
 
 setup_trace(state(Visible, Leash, Ref)) :-
     asserta((user:prolog_trace_interception(Port, Frame, _, continue) :-
@@ -100,13 +108,13 @@ port_mask([H|T], Mask) :-
     '$syspreds':port_name(H, Bit),
     Mask is M0 \/ Bit.
 
-cleanup_trace(state(Visible, Leash, Ref)) :-
+cleanup_trace(state(Visible, Leash, Ref), Modules) :-
     nodebug,
     '$visible'(_, Visible),
     '$leash'(_, Leash),
     erase(Ref),
     covered(Succeeded, Failed),
-    file_coverage(Succeeded, Failed).
+    file_coverage(Succeeded, Failed, Modules).
 
 
 %!  assert_cover(+Port, +Frame) is det.
@@ -168,12 +176,13 @@ covered(Succeeded, Failed) :-
                  *           REPORTING          *
                  *******************************/
 
-%!  file_coverage(+Succeeded, +Failed) is det.
+%!  file_coverage(+Succeeded, +Failed, +Modules) is det.
 %
-%   Write a report on  the  clauses   covered  organised  by file to
-%   current output.
+%   Write a report on the clauses covered   organised by file to current
+%   output. Show detailed information about   the  non-coverered clauses
+%   defined in the modules Modules.
 
-file_coverage(Succeeded, Failed) :-
+file_coverage(Succeeded, Failed, Modules) :-
     format('~N~n~`=t~78|~n'),
     format('~tCoverage by File~t~78|~n'),
     format('~`=t~78|~n'),
@@ -181,10 +190,10 @@ file_coverage(Succeeded, Failed) :-
            ['File', 'Clauses', '%Cov', '%Fail']),
     format('~`=t~78|~n'),
     forall(source_file(File),
-           file_coverage(File, Succeeded, Failed)),
+           file_coverage(File, Succeeded, Failed, Modules)),
     format('~`=t~78|~n').
 
-file_coverage(File, Succeeded, Failed) :-
+file_coverage(File, Succeeded, Failed, Modules) :-
     findall(Cl, clause_source(Cl, File, _), Clauses),
     sort(Clauses, All),
     (   ord_intersect(All, Succeeded)
@@ -196,14 +205,40 @@ file_coverage(File, Succeeded, Failed) :-
     ord_intersection(All, Succeeded, SucceededInFile),
     ord_subtract(All, SucceededInFile, UnCov1),
     ord_subtract(UnCov1, FailedInFile, Uncovered),
-    length(All, AC),
-    length(Uncovered, UC),
-    length(FailedInFile, FC),
+
+    %if doc_collect (from pldoc) is active, pldoc comments are recorded as
+    % clauses but we do not want to count them in the statistics
+    exclude(is_pldoc, All, All_wo_pldoc),
+    exclude(is_pldoc, Uncovered, Uncovered_wo_pldoc),
+    exclude(is_pldoc, FailedInFile, Failed_wo_pldoc),
+
+    %We do not want to count clauses such as :-use_module(_) in the statistics
+    exclude(is_system_clause, All_wo_pldoc, All_wo_system),
+    exclude(is_system_clause, Uncovered_wo_pldoc, Uncovered_wo_system),
+    exclude(is_system_clause, Failed_wo_pldoc, Failed_wo_system),
+
+    length(All_wo_system, AC),
+    length(Uncovered_wo_system, UC),
+    length(Failed_wo_system, FC),
+
     CP is 100-100*UC/AC,
     FCP is 100*FC/AC,
     summary(File, 56, SFile),
-    format('~w~t ~D~64| ~t~1f~72| ~t~1f~78|~n', [SFile, AC, CP, FCP]).
-file_coverage(_,_,_).
+    format('~w~t ~D~64| ~t~1f~72| ~t~1f~78|~n', [SFile, AC, CP, FCP]),
+    detailed_report(Uncovered_wo_system, Modules).
+file_coverage(_,_,_,_).
+
+
+is_system_clause(Clause) :-
+    clause_name(Clause, Name),
+    Name = system:_.
+
+is_pldoc(Clause) :-
+    clause_name(Clause, _Module:Name2/_Arity),
+    pldoc_predicate(Name2).
+
+pldoc_predicate('$pldoc').
+pldoc_predicate('$mode').
 
 
 summary(Atom, MaxLen, Summary) :-
@@ -236,3 +271,36 @@ clause_source(Clause, File, Line) :-
     nth_clause(Pred, _Index, Clause),
     clause_property(Clause, file(File)),
     clause_property(Clause, line_count(Line)).
+
+%! detailed_report(+Uncovered:list(clause), +Modules:list(atom)) is det
+
+detailed_report(Uncovered, Modules):-
+    maplist(clause_line_pair, Uncovered, Pairs),
+    include(pair_in_modules(Modules), Pairs, Pairs_in_modules),
+    (   Pairs_in_modules \== []
+    ->  sort(Pairs_in_modules, Pairs_sorted),
+        group_pairs_by_key(Pairs_sorted, Compact_pairs),
+        nl,
+        format('~2|Predicates not covered from modules ~p~n', [Modules]),
+        format('~4|Predicate ~59|Lines ~n', []),
+        maplist(print_clause_line, Compact_pairs),
+        nl
+    ;   true
+    ).
+
+pair_in_modules(Modules,(Module:_Name)-_Line):-
+    memberchk(Module, Modules).
+
+clause_line_pair(Clause, Name-Line):-
+    clause_property(Clause, line_count(Line)),
+    clause_name(Clause, Name).
+
+clause_name(Clause,Name):-
+    clause(Module:Head, _, Clause),
+    functor(Head,F,A),
+    Name=Module:F/A.
+
+print_clause_line((Module:Name/Arity)-Lines):-
+    term_to_atom(Module:Name, Complete_name),
+    summary(Complete_name, 54, SName),
+    format('~4|~w~t~59|~p~n', [SName/Arity, Lines]).
