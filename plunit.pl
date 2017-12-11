@@ -1764,7 +1764,7 @@ fixme_message(Location, Reason, nondet) -->
 write_options([ numbervars(true),
                 quoted(true),
                 portray(true),
-                max_depth(10),
+                max_depth(100),
                 attributes(portray)
               ]).
 
