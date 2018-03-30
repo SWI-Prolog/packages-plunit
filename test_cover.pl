@@ -95,6 +95,7 @@ show_coverage(Goal, Modules):-
         cleanup_trace(State, Modules)).
 
 setup_trace(state(Visible, Leash, Ref)) :-
+    set_prolog_flag(coverage_analysis, true),
     asserta((user:prolog_trace_interception(Port, Frame, _, continue) :-
                     prolog_cover:assert_cover(Port, Frame)), Ref),
     port_mask([unify,exit], Mask),
@@ -113,6 +114,7 @@ cleanup_trace(state(Visible, Leash, Ref), Modules) :-
     '$visible'(_, Visible),
     '$leash'(_, Leash),
     erase(Ref),
+    set_prolog_flag(coverage_analysis, false),
     covered(Succeeded, Failed),
     file_coverage(Succeeded, Failed, Modules).
 
