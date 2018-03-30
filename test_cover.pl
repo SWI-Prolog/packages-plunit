@@ -45,7 +45,7 @@
 /** <module> Clause cover analysis
 
 The purpose of this module is to find which part of the program has been
-use by a certain goal. Usage is defined   in  terms of clauses that have
+used by a certain goal. Usage is defined   in terms of clauses that have
 fired, seperated in clauses that  succeeded   at  least once and clauses
 that failed on each occasion.
 
@@ -239,7 +239,7 @@ is_pldoc(Clause) :-
 
 pldoc_predicate('$pldoc').
 pldoc_predicate('$mode').
-
+pldoc_predicate('$pred_option').
 
 summary(Atom, MaxLen, Summary) :-
     atom_length(Atom, Len),
@@ -281,8 +281,8 @@ detailed_report(Uncovered, Modules):-
     ->  sort(Pairs_in_modules, Pairs_sorted),
         group_pairs_by_key(Pairs_sorted, Compact_pairs),
         nl,
-        format('~2|Predicates not covered from modules ~p~n', [Modules]),
-        format('~4|Predicate ~59|Lines ~n', []),
+        format('~2|Clauses not covered from modules ~p~n', [Modules]),
+        format('~4|Predicate ~59|Clauses at lines ~n', []),
         maplist(print_clause_line, Compact_pairs),
         nl
     ;   true
