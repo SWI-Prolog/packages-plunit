@@ -7,3 +7,6 @@ swipl_plugin(plunit
 	     PL_LIBS plunit.pl test_wizard.pl test_cover.pl)
 
 swipl_examples(examples/read.pl examples/simple.pl)
+
+pkg_doc(plunit)
+
