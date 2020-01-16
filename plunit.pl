@@ -48,7 +48,7 @@
 /** <module> Unit Testing
 
 Unit testing environment for SWI-Prolog and   SICStus Prolog. For usage,
-please visit http://www.swi-prolog.org/pldoc/package/plunit.html.
+please visit http://www.swi-prolog.org/pldoc/package/plunit.
 
 @author         Jan Wielemaker
 @license        GPL+SWI-exception or Artistic 2.0
