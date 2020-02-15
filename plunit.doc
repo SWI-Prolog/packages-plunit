@@ -606,6 +606,10 @@ is provided by the library \pllib{test_cover}.
 Run \arg{Goal} and write a report on which percentage of the clauses in
 each file are used by the program and which percentage of the clauses
 always fail.
+
+    \predicate{show_coverage}{2}{:Goal, +Modules}
+As show_coverage/1, but only report on modules in the list
+\arg{Modules}.
 \end{description}
 
 We illustrate this here using CHAT, a natural language question and
