@@ -37,10 +37,11 @@
           [ make_tests/3,               % +Module, +File, +Out
             make_test/3                 % +Callable, -Module, -Test
           ]).
-:- use_module(library(time)).
-:- use_module(library(lists)).
-:- use_module(library(listing)).
-:- use_module(library(readutil)).
+:- autoload(library(apply),[maplist/2]).
+:- autoload(library(listing),[portray_clause/2]).
+:- autoload(library(lists),[member/2]).
+:- autoload(library(readutil),[read_file_to_terms/3]).
+:- autoload(library(time),[call_with_time_limit/2]).
 
 /** <module> Test Generation Wizard
 

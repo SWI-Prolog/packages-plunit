@@ -54,8 +54,12 @@ please visit http://www.swi-prolog.org/pldoc/package/plunit.
 @license        GPL+SWI-exception or Artistic 2.0
 */
 
-:- use_module(library(apply)).
-:- use_module(library(ordsets), [ord_intersection/3]).
+:- autoload(library(apply),[maplist/3,include/3]).
+:- autoload(library(lists),[member/2,append/2]).
+:- autoload(library(option),[option/3,option/2]).
+:- autoload(library(ordsets),[ord_intersection/3]).
+:- autoload(library(pairs),[group_pairs_by_key/2,pairs_values/2]).
+
 :- meta_predicate valid_options(+, 1).
 
 
@@ -115,9 +119,6 @@ throw_error(Error_term,Impldef) :-
     throw(error(Error_term,context(Impldef,_))).
 
 :- set_prolog_flag(generate_debug_info, false).
-:- use_module(library(option)).
-:- use_module(library(pairs)).
-
 current_test_flag(Name, Value) :-
     current_prolog_flag(Name, Value).
 
@@ -141,8 +142,7 @@ goal_expansion(current_module(Module,File),
 throw_error(Error_term,Impldef) :-
     throw(error(Error_term,i(Impldef))). % SICStus 3 work around
 
-:- use_module(swi).                     % SWI-Compatibility
-:- use_module(library(terms)).
+% SWI-Compatibility
 :- op(700, xfx, =@=).
 
 '$set_source_module'(_, _).
@@ -184,8 +184,6 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
                  /*******************************
                  *            IMPORTS           *
                  *******************************/
-
-:- use_module(library(lists)).
 
 :- initialization
    (   current_test_flag(test_options, _)
@@ -475,7 +473,6 @@ system:term_expansion(Term, Expanded) :-
                  *******************************/
 
 :- if(swi).
-:- use_module(library(error)).
 :- else.
 must_be(list, X) :-
     !,
