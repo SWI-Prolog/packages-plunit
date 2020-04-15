@@ -59,6 +59,7 @@ please visit http://www.swi-prolog.org/pldoc/package/plunit.
 :- autoload(library(option),[option/3,option/2]).
 :- autoload(library(ordsets),[ord_intersection/3]).
 :- autoload(library(pairs),[group_pairs_by_key/2,pairs_values/2]).
+:- autoload(library(error),[must_be/2]).
 
 :- meta_predicate valid_options(+, 1).
 
