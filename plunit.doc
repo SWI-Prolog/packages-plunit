@@ -171,8 +171,9 @@ Body must fail.
 
     \termitem{throws}{Error}
 Body must throw \arg{Error}. The error is verified using
-\term{subsumes_chk}{Error, Generated}.  I.e.\ the generated error
-must be more specific than the specified \arg{Error}.
+\term{subsumes_term}{Error, Generated}.  I.e., the generated error
+must be more specific than the specified \arg{Error}.  See
+subsumes_term/2.
 
     \termitem{error}{Error}
 Body must throw \term{error}{Error, _Context}.  See \const{throws}
