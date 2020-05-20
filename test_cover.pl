@@ -49,7 +49,7 @@
 
 The purpose of this module is to find which part of the program has been
 used by a certain goal. Usage is defined   in terms of clauses that have
-fired, seperated in clauses that  succeeded   at  least once and clauses
+fired, separated in clauses that  succeeded   at  least once and clauses
 that failed on each occasion.
 
 This module relies on the  SWI-Prolog   tracer  hooks. It modifies these
