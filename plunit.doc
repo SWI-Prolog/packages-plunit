@@ -145,9 +145,11 @@ with different inputs.  If an error occurs, the test is reported as
 <vars> indicates the bindings of variables in \arg{Generator}.
 
     \termitem{true}{AnswerTerm Cmp Value}
-Body must succeed deterministically. AnswerTerm is compared to Value
-using the comparison operator \arg{Cmp}. \arg{Cmp} is typically one of
-=/2, ==/2, =:=/2 or =@=/2,%
+Body should succeed deterministically. If a choicepoint is left open, a
+warning is printed to STDERR ("Test succeeded with choicepoint"). That
+warning can be suppressed by adding the \term{nondet} keyword. \arg{AnswerTerm}
+is compared to \arg{Value} using the comparison operator \arg{Cmp}. \arg{Cmp} 
+is typically one of =/2, ==/2, =:=/2 or =@=/2,%
     \footnote{The =@= predicate (denoted \emph{structural equivalence})
 	      is the same as variant/2 in SICStus.}
 but any test can be used. This is the same as inserting the test at the
@@ -170,14 +172,14 @@ of the comparison operators given above.
 Body must fail.
 
     \termitem{throws}{Error}
-Body must throw \arg{Error}. The error is verified using
-\term{subsumes_term}{Error, Generated}.  I.e., the generated error
-must be more specific than the specified \arg{Error}.  See
+Body must throw \arg{Error}. The thrown error term is matched against 
+term \arg{Error} using \term{subsumes_term}{Error, ThrownError}. I.e., the
+thrown error must be more specific than the specified \arg{Error}.  See
 subsumes_term/2.
 
     \termitem{error}{Error}
-Body must throw \term{error}{Error, _Context}.  See \const{throws}
-for details.
+Body must throw \term{error}{Error, _Context}.  See keyword \const{throws}
+(as well as predicate throw/1 and library(error)) for details.
 
     \termitem{all}{AnswerTerm Cmp Instances}
 Similar to \term{true}{AnswerTerm Cmp Values}, but used for non-deterministic
