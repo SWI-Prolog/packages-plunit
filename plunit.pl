@@ -43,6 +43,7 @@
             run_tests/1,                % Run named test-set
             load_test_files/1,          % +Options
             running_tests/0,            % Prints currently running test
+            current_test/5,             % ?Unit,?Test,?Line,?Body,?Options
             test_report/1               % +What
           ]).
 
@@ -790,9 +791,6 @@ cleanup_trap_assertions(_).
 :- endif.
 
 
-
-
-
                  /*******************************
                  *         RUNNING A TEST       *
                  *******************************/
@@ -1252,6 +1250,14 @@ running_tests(Running) :-
                 unit_file(Unit, File)
             ), Running).
 
+
+%!  current_test(?Unit, ?Test, ?Line, ?Body, ?Options)
+%
+%   True when a test with the specified properties is loaded.
+
+current_test(Unit, Test, Line, Body, Options) :-
+    current_unit(Unit, Module, _Supers, _UnitOptions),
+    Module:'unit test'(Test, Line, Options, Body).
 
 %!  check_for_test_errors is semidet.
 %
