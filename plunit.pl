@@ -3,8 +3,9 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2006-2015, University of Amsterdam
+    Copyright (c)  2006-2020, University of Amsterdam
                               VU University Amsterdam
+                              CWI, Amsterdam
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -49,9 +50,6 @@
 
 Unit testing environment for SWI-Prolog and   SICStus Prolog. For usage,
 please visit http://www.swi-prolog.org/pldoc/package/plunit.
-
-@author         Jan Wielemaker
-@license        GPL+SWI-exception or Artistic 2.0
 */
 
 :- autoload(library(apply),[maplist/3,include/3]).
