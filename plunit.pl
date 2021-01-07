@@ -222,6 +222,11 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
 %           If =true= (default =false), cleanup report at the end
 %           of run_tests/1.  Used to improve cooperation with
 %           memory debuggers such as dmalloc.
+%
+%           * concurrent(+Bool)
+%           If =true= (default =false), run all tests in a block
+%           concurrently.
+%
 
 set_test_options(Options) :-
     valid_options(Options, global_test_option),
@@ -236,6 +241,8 @@ global_test_option(silent(Bool)) :-
 global_test_option(sto(Bool)) :-
     must_be(boolean, Bool).
 global_test_option(cleanup(Bool)) :-
+    must_be(boolean, Bool).
+global_test_option(concurrent(Bool)) :-
     must_be(boolean, Bool).
 
 
@@ -611,9 +618,14 @@ run_unit(Spec) :-
     ->  info(plunit(blocked(unit(Unit, Reason))))
     ;   setup(Module, unit(Unit), UnitOptions)
     ->  info(plunit(begin(Spec))),
-        forall((Module:'unit test'(Name, Line, Options, Body),
-                matching_test(Name, Tests)),
-               run_test(Unit, Name, Line, Options, Body)),
+        current_test_flag(test_options, Global_Options),
+        (   option(concurrent(true), Global_Options)
+        ->  concurrent_forall((Module:'unit test'(Name, Line, Options, Body),
+                               matching_test(Name, Tests)),
+                              run_test(Unit, Name, Line, Options, Body))
+        ;   forall((Module:'unit test'(Name, Line, Options, Body),
+                    matching_test(Name, Tests)),
+                   run_test(Unit, Name, Line, Options, Body))),
         info(plunit(end(Spec))),
         (   message_level(silent)
         ->  true
