@@ -560,7 +560,7 @@ test_set_option(concurrent(V)) :-
                  *        RUNNING TOPLEVEL      *
                  *******************************/
 
-:- thread_local
+:- dynamic
     passed/5,                       % Unit, Test, Line, Det, Time
     failed/4,                       % Unit, Test, Line, Reason
     failed_assertion/7,             % Unit, Test, Line, ALoc, STO, Reason, Goal
