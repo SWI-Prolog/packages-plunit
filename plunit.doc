@@ -449,8 +449,10 @@ loaded into the current project.
 \section{Running the test-suite}
 \label{sec:pldoc-running}
 
-At any time, the tests can be executed by loading the program and
-running run_tests/0 or run_tests(+Unit).
+\subsection{Running the test suite from Prolog}
+
+To run tests from the Prolog prompt, first load the program and
+then run run_tests/0 or \term{run_tests}{+Unit}.
 
 \begin{description}
     \predicate{run_tests}{0}{}
@@ -473,6 +475,22 @@ normally though.}
 
 To identify nonterminating tests, interrupt the looping process with
 \emph{Control-C}. The test name and location will be displayed.
+
+\subsection{Running the test suite from the command line}
+
+To run a file's tests from the command line, run the following command,
+replacing \verb$your/file.pl$ with the path to your file.
+
+\begin{code}
+swipl -s your/file.pl -g run_tests,halt -t 'halt(1)'
+\end{code}
+
+Prolog will (1) load the file you specify, as well as any modules it
+depends on; (2) run all tests in those files, and (3) exit with status 0
+or 1 depending on whether the test suite succeeds or fails.
+
+If you want to test multiple files, you can pass multiple
+\verb$-s FILE.pl$ options.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Tests and production systems}
