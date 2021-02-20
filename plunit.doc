@@ -148,7 +148,7 @@ with different inputs.  If an error occurs, the test is reported as
 Body should succeed deterministically. If a choicepoint is left open, a
 warning is printed to STDERR ("Test succeeded with choicepoint"). That
 warning can be suppressed by adding the \term{nondet} keyword. \arg{AnswerTerm}
-is compared to \arg{Value} using the comparison operator \arg{Cmp}. \arg{Cmp} 
+is compared to \arg{Value} using the comparison operator \arg{Cmp}. \arg{Cmp}
 is typically one of =/2, ==/2, =:=/2 or =@=/2,%
     \footnote{The =@= predicate (denoted \emph{structural equivalence})
 	      is the same as variant/2 in SICStus.}
@@ -172,7 +172,7 @@ of the comparison operators given above.
 Body must fail.
 
     \termitem{throws}{Error}
-Body must throw \arg{Error}. The thrown error term is matched against 
+Body must throw \arg{Error}. The thrown error term is matched against
 term \arg{Error} using \term{subsumes_term}{Error, ThrownError}. I.e., the
 thrown error must be more specific than the specified \arg{Error}.  See
 subsumes_term/2.
@@ -449,8 +449,10 @@ loaded into the current project.
 \section{Running the test-suite}
 \label{sec:pldoc-running}
 
-At any time, the tests can be executed by loading the program and
-running run_tests/0 or run_tests(+Unit).
+\subsection{Running the test suite from Prolog}
+
+To run tests from the Prolog prompt, first load the program and
+then run run_tests/0 or \term{run_tests}{+Unit}.
 
 \begin{description}
     \predicate{run_tests}{0}{}
@@ -473,6 +475,23 @@ normally though.}
 
 To identify nonterminating tests, interrupt the looping process with
 \emph{Control-C}. The test name and location will be displayed.
+
+\subsection{Running the test suite from the command line}
+
+To run a file's tests from the command line, run the following command,
+replacing \file{your/file.pl} with the path to your file.
+
+\begin{code}
+swipl -g run_tests -t halt your/file.pl
+\end{code}
+
+Prolog will (1) load the file you specify, as well as any modules it
+depends on; (2) run all tests in those files, and (3) exit with status 0
+or 1 depending on whether the test suite succeeds or fails.
+
+If you want to test multiple files, you can pass multiple \fileext{.pl}
+files.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Tests and production systems}
