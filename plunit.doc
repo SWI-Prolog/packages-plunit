@@ -450,6 +450,7 @@ loaded into the current project.
 \label{sec:pldoc-running}
 
 \subsection{Running the test suite from Prolog}
+\label{sec:pldoc-running-repl}
 
 To run tests from the Prolog prompt, first load the program and
 then run run_tests/0 or \term{run_tests}{+Unit}.
@@ -477,6 +478,7 @@ To identify nonterminating tests, interrupt the looping process with
 \emph{Control-C}. The test name and location will be displayed.
 
 \subsection{Running the test suite from the command line}
+\label{sec:pldoc-running-cli}
 
 To run a file's tests from the command line, run the following command,
 replacing \file{your/file.pl} with the path to your file.
