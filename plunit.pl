@@ -1166,9 +1166,9 @@ success(Unit, Name, Line, Det, _Time, Options) :-
     (   (   Det == true
         ;   memberchk(nondet, Options)
         )
-    ->  put_char(user_error, +),
+    ->  progress(Unit, Name, nondet),
         Ok = passed
-    ;   put_char(user_error, !),
+    ;   progress(Unit, Name, fixme),
         Ok = nondet
     ),
     flush_output(user_error),
@@ -1182,17 +1182,15 @@ success(Unit, Name, Line, Det, Time, Options) :-
     (   (   Det == true
         ;   memberchk(nondet, Options)
         )
-    ->  put_char(user_error, .)
+    ->  progress(Unit, Name, passed)
     ;   unit_file(Unit, File),
         print_message(warning, plunit(nondet(File, Line, Name)))
-    ),
-    flush_output(user_error).
+    ).
 
 failure(Unit, Name, Line, _, Options) :-
     memberchk(fixme(Reason), Options),
     !,
-    put_char(user_error, -),
-    flush_output(user_error),
+    progress(Unit, Name, failed),
     assert(fixme(Unit, Name, Line, Reason, failed)).
 failure(Unit, Name, Line, E, Options) :-
     report_failure(Unit, Name, Line, E, Options),
@@ -1365,9 +1363,9 @@ fixme(How, Tuples, Count) :-
     length(Tuples, Count).
 
 
-report_failure(_, _, _, assertion, _) :-
+report_failure(Unit, Name, _, assertion, _) :-
     !,
-    put_char(user_error, 'A').
+    progress(Unit, Name, assertion).
 report_failure(Unit, Name, Line, Error, _Options) :-
     print_message(error, plunit(failed(Unit, Name, Line, Error))).
 
@@ -1449,6 +1447,9 @@ info(Term) :-
     message_level(Level),
     print_message(Level, Term).
 
+progress(Unit, Name, Result) :-
+    print_message(information, plunit(progress(Unit, Name, Result))).
+
 message_level(Level) :-
     current_test_flag(test_options, Options),
     option(silent(Silent), Options, false),
@@ -1485,6 +1486,8 @@ message(error(plunit(incompatible_options, Tests), _)) -->
 
                                         % Unit start/end
 :- if(swi).
+message(plunit(progress(_Unit, _Name, Result))) -->
+    [ at_same_line ], result(Result), [flush].
 message(plunit(begin(Unit))) -->
     [ 'PL-Unit: ~w '-[Unit], flush ].
 message(plunit(end(_Unit))) -->
@@ -1618,6 +1621,12 @@ unqualify(M:Goal, _, Goal) :-
     predicate_property(M:Goal, imported_from(system)),
     !.
 unqualify(Goal, _, Goal).
+
+result(passed)    --> ['.'-[]].
+result(nondet)    --> ['+'-[]].
+result(fixme)     --> ['!'-[]].
+result(failed)    --> ['-'-[]].
+result(assertion) --> ['A'-[]].
 
 :- endif.
                                         % Setup/condition errors
