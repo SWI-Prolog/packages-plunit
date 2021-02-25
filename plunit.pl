@@ -3,9 +3,10 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2006-2020, University of Amsterdam
+    Copyright (c)  2006-2021, University of Amsterdam
                               VU University Amsterdam
                               CWI, Amsterdam
+                              SWI-Prolog Solutions b.v.
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -1296,6 +1297,12 @@ report :-
     number_of_clauses(failed_assertion/7, FailedAssertion),
     number_of_clauses(blocked/4, Blocked),
     number_of_clauses(sto/4, STO),
+    print_message(silent,
+                  plunit(summary(plunit{passed:Passed,
+                                        failed:Failed,
+                                        failed_assertions:FailedAssertion,
+                                        blocked:Blocked,
+                                        sto:STO}))),
     (   Passed+Failed+FailedAssertion+Blocked+STO =:= 0
     ->  info(plunit(no_tests))
     ;   Failed+FailedAssertion+Blocked+STO =:= 0
