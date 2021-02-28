@@ -1473,6 +1473,7 @@ locationprefix(FileLine) -->
 
 :- discontiguous
     message//1.
+:- '$hide'(message//1).
 
 message(error(context_error(plunit_close(Name, -)), _)) -->
     [ 'PL-Unit: cannot close unit ~w: no open unit'-[Name] ].
