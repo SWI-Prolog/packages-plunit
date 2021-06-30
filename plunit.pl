@@ -280,6 +280,7 @@ begin_tests(Unit) :-
     begin_tests(Unit, []).
 
 begin_tests(Unit, Options) :-
+    must_be(atom, Unit),
     valid_options(Options, test_set_option),
     make_unit_module(Unit, Name),
     source_location(File, Line),
