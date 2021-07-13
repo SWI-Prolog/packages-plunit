@@ -2,9 +2,10 @@
 
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
-    WWW:           http://www.swi-prolog.org
-    Copyright (c)  2006-2017, University of Amsterdam
+    WWW:           https://www.swi-prolog.org
+    Copyright (c)  2006-2021, University of Amsterdam
                               VU University Amsterdam
+                              SWI-Prolog Solutions b.v.
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -35,7 +36,7 @@
 
 :- module(prolog_cover,
           [ show_coverage/1,            % :Goal
-            show_coverage/2
+            show_coverage/2             % :Goal, +Modules
           ]).
 :- autoload(library(apply),[exclude/3,maplist/3,include/3,maplist/2]).
 :- autoload(library(edinburgh),[nodebug/0]).
@@ -45,7 +46,7 @@
 
 :- set_prolog_flag(generate_debug_info, false).
 
-/** <module> Clause cover analysis
+/** <module> Clause coverage analysis
 
 The purpose of this module is to find which part of the program has been
 used by a certain goal. Usage is defined   in terms of clauses that have
@@ -74,7 +75,7 @@ are omitted from the result.
 */
 
 
-:- dynamic
+:- thread_local
     entered/1,                      % clauses entered
     exited/1.                       % clauses completed
 
@@ -146,7 +147,8 @@ assert_cover(_, _).
 
 running_static_pred(Frame) :-
     prolog_frame_attribute(Frame, goal, Goal),
-    \+ predicate_property(Goal, dynamic).
+    \+ '$get_predicate_attribute'(Goal, (dynamic), 1).
+%   \+ predicate_property(Goal, dynamic).
 
 %!  assert_entered(+Ref) is det.
 %!  assert_exited(+Ref) is det.
@@ -245,6 +247,7 @@ is_pldoc(Clause) :-
 pldoc_predicate('$pldoc').
 pldoc_predicate('$mode').
 pldoc_predicate('$pred_option').
+pldoc_predicate('$exported_op').        % not really PlDoc ...
 
 summary(Atom, MaxLen, Summary) :-
     atom_length(Atom, Len),
