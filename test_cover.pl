@@ -232,7 +232,11 @@ file_coverage(File, Succeeded, Failed, Modules) :-
     FCP is 100*FC/AC,
     summary(File, 56, SFile),
     format('~w~t ~D~64| ~t~1f~72| ~t~1f~78|~n', [SFile, AC, CP, FCP]),
-    detailed_report(Uncovered_wo_system, Modules).
+    (   source_file_property(SFile, module(Module)),
+        memberchk(Module, Modules)
+    ->  detailed_report(Uncovered_wo_system, SFile)
+    ;   true
+    ).
 file_coverage(_,_,_,_).
 
 
@@ -280,30 +284,29 @@ clause_source(Clause, File, Line) :-
     clause_property(Clause, file(File)),
     clause_property(Clause, line_count(Line)).
 
-%! detailed_report(+Uncovered:list(clause), +Modules:list(atom)) is det
+%! detailed_report(+Uncovered:list(clause), +File:atom) is det
 
-detailed_report(Uncovered, Modules):-
-    maplist(clause_line_pair, Uncovered, Pairs),
-    include(pair_in_modules(Modules), Pairs, Pairs_in_modules),
-    (   Pairs_in_modules \== []
-    ->  sort(Pairs_in_modules, Pairs_sorted),
-        group_pairs_by_key(Pairs_sorted, Compact_pairs),
-        nl,
-        format('~2|Clauses not covered from modules ~p~n', [Modules]),
-        format('~4|Predicate ~59|Clauses at lines ~n', []),
-        maplist(print_clause_line, Compact_pairs),
-        nl
-    ;   true
-    ).
+detailed_report(Uncovered, File):-
+    convlist(uncovered_clause_line(File), Uncovered, Pairs),
+    sort(Pairs, Pairs_sorted),
+    group_pairs_by_key(Pairs_sorted, Compact_pairs),
+    nl,
+    file_base_name(File, Base),
+    format('~2|Clauses not covered from file ~p~n', [Base]),
+    format('~4|Predicate ~59|Clauses at lines ~n', []),
+    maplist(print_clause_line, Compact_pairs),
+    nl.
 
-pair_in_modules(Modules,(Module:_Name)-_Line):-
-    memberchk(Module, Modules).
+uncovered_clause_line(File, Clause, Name-Line) :-
+    clause_property(Clause, file(File)),
+    clause_name(Clause, Name),
+    clause_property(Clause, line_count(Line)).
 
-clause_line_pair(Clause, Name-Line):-
-    clause_property(Clause, line_count(Line)),
-    clause_name(Clause, Name).
+%!  clause_name(+Clause, -Name) is det.
+%
+%   Return the clause predicate indicator as Module:Name/Arity.
 
-clause_name(Clause,Name):-
+clause_name(Clause, Name) :-
     clause(Module:Head, _, Clause),
     functor(Head,F,A),
     Name=Module:F/A.
