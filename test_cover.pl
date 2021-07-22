@@ -332,7 +332,7 @@ file_coverage(File, Succeeded, Failed, Options) :-
     (   list_details(File, Options),
         clean_set(SucceededInFile, Succeeded_wo_system),
         ord_union(Failed_wo_system, Succeeded_wo_system, Covered)
-    ->  detailed_report(Uncovered_wo_system, Covered, SFile, Options)
+    ->  detailed_report(Uncovered_wo_system, Covered, File, Options)
     ;   true
     ).
 file_coverage(_,_,_,_).
