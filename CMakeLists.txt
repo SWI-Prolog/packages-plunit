@@ -8,5 +8,7 @@ swipl_plugin(plunit
 
 swipl_examples(examples/read.pl examples/simple.pl)
 
-pkg_doc(plunit)
+pkg_doc(plunit
+	SECTION
+	SOURCE test_cover.pl)
 
