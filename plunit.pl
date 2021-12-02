@@ -473,7 +473,11 @@ expand(test(Name, _Options), _) :-
 
 system:term_expansion(Term, Expanded) :-
     (   loading_unit(_, _, File, _)
-    ->  source_location(File, _),
+    ->  source_location(ThisFile, _),
+        (   File == ThisFile
+        ->  true
+        ;   source_file_property(ThisFile, included_in(File, _))
+        ),
         expand(Term, Expanded)
     ).
 
