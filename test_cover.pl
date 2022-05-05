@@ -133,189 +133,26 @@ show_coverage(Goal, Modules) :-
 show_coverage(Goal, Options) :-
     clean_output(Options),
     setup_call_cleanup(
-        setup_trace(State),
+        '$cov_start',
         once(Goal),
-        cleanup_trace(State, Options)).
+        cleanup_trace(Options)).
 
-setup_trace(state(Visible, Leash, Ref)) :-
-    nb_setval(cover_count, 0),
-    nb_setval(cover_enter, [](0)),
-    nb_setval(cover_exits, [](0)),
-    set_prolog_flag(coverage_analysis, true),
-    asserta((user:prolog_trace_interception(Port, Frame, _, continue) :-
-                    prolog_cover:assert_cover(Port, Frame)), Ref),
-    port_mask([unify,exit,call], Mask),
-    '$visible'(Visible, Mask),
-    '$leash'(Leash, Mask),
-    trace.
-
-port_mask([], 0).
-port_mask([H|T], Mask) :-
-    port_mask(T, M0),
-    '$syspreds':port_name(H, Bit),
-    Mask is M0 \/ Bit.
-
-cleanup_trace(state(Visible, Leash, Ref), Options) :-
-    nodebug,
-    '$visible'(_, Visible),
-    '$leash'(_, Leash),
-    erase(Ref),
-    set_prolog_flag(coverage_analysis, false),
+cleanup_trace(Options) :-
+    '$cov_stop',
     covered(Succeeded, Failed),
     (   report_hook(Succeeded, Failed)
     ->  true
     ;   file_coverage(Succeeded, Failed, Options)
     ),
-    clean_data.
-
-%!  assert_cover(+Port, +Frame) is det.
-%
-%   Assert coverage of the current clause. We monitor two ports: the
-%   _unify_ port to see which  clauses   we  entered, and the _exit_
-%   port to see which completed successfully.
-
-:- public assert_cover/2.
-
-assert_cover(call, Frame) =>
-    (   call_site(Frame, CallSite)
-    ->  assert_event(cover_enter, CallSite)
-    ;   true
-    ).
-assert_cover(unify, Frame) =>
-    (   prolog_frame_attribute(Frame, clause, Cl),
-        running_static_pred(Frame)
-    ->  assert_event(cover_enter, Cl)
-    ;   true
-    ).
-assert_cover(exit, Frame) =>
-    !,
-    (   prolog_frame_attribute(Frame, clause, Cl),
-        running_static_pred(Frame)
-    ->  assert_event(cover_exits, Cl)
-    ;   true
-    ),
-    (   call_site(Frame, CallSite)
-    ->  assert_event(cover_exits, CallSite)
-    ;   true
-    ).
-
-call_site(Frame, call_site(Clause,PC,PI)) :-
-    prolog_frame_attribute(Frame, pc, PC),
-    prolog_frame_attribute(Frame, predicate_indicator, PI),
-    prolog_frame_attribute(Frame, parent, Parent),
-    running_static_pred(Parent),
-    prolog_frame_attribute(Parent, clause, Clause).
-
-%!  running_static_pred(+Frame) is semidet.
-%
-%   True if Frame is not running a dynamic predicate.
-
-running_static_pred(Frame) :-
-    prolog_frame_attribute(Frame, goal, Goal),
-    \+ '$get_predicate_attribute'(Goal, (dynamic), 1).
-
-%!  assert_event(+Event, +Object) is det.
-%
-%   Count a new event on Object.  Currently   Object  is either a clause
-%   reference of a term call_site(Clause,PC).
-
-assert_event(Event, Object) :-
-    add_clause(Object, I),
-    bump(Event, I).
-
-bump(Var, I) :-
-    nb_getval(Var, Array),
-    arg(I, Array, Old),
-    New is Old+1,
-    nb_setarg(I, Array, New).
-
-:- dynamic
-    object_index/2.
-
-add_clause(Cl, I) :-
-    object_index(Cl, I),
-    !.
-add_clause(Cl, I) :-
-    nb_getval(cover_count, I0),
-    I is I0+1,
-    nb_setval(cover_count, I),
-    assertz(object_index(Cl, I)),
-    expand_arrays(I).
-
-expand_arrays(I) :-
-    nb_getval(cover_enter, Array),
-    functor(Array, _, Arity),
-    I =< Arity,
-    !.
-expand_arrays(_) :-
-    grow_array(cover_enter),
-    grow_array(cover_exits).
-
-grow_array(Name) :-
-    nb_getval(Name, Array),
-    functor(Array, F, Arity),
-    NewSize is Arity*2,
-    functor(NewArray, F, NewSize),
-    copy_args(1, Arity, Array, NewArray),
-    FillStart is Arity+1,
-    fill_args(FillStart, NewSize, NewArray),
-    nb_setval(Name, NewArray).
-
-copy_args(I, End, From, To) :-
-    I =< End,
-    !,
-    arg(I, From, A),
-    arg(I, To, A),
-    I2 is I+1,
-    copy_args(I2, End, From, To).
-copy_args(_, _, _, _).
-
-fill_args(I, End, To) :-
-    I =< End,
-    !,
-    arg(I, To, 0),
-    I2 is I+1,
-    fill_args(I2, End, To).
-fill_args(_, _, _).
-
-clean_data :-
-    nb_delete(cover_count),
-    nb_delete(cover_enter),
-    nb_delete(cover_exits),
-    retractall(object_index(_,_)).
-
-%!  count(+Which, +Clause, -Count) is semidet.
-%
-%   Get event counts for Clause.
-
-count(Which, Cl, Count) :-
-    object_index(Cl, I),
-    counter(Which),
-    nb_getval(Which, Array),
-    arg(I, Array, Count).
-
-counter(cover_enter).
-counter(cover_exits).
-
-entered(Cl) :-
-    count(cover_enter, Cl, Count),
-    Count > 0.
-exited(Cl) :-
-    count(cover_exits, Cl, Count),
-    Count > 0.
-
-entered(Cl, Count) :-
-    count(cover_enter, Cl, Count).
-exited(Cl, Count) :-
-    count(cover_exits, Cl, Count).
+    '$cov_reset'.
 
 %!  covered(-Succeeded, -Failed) is det.
 %
 %   Collect failed and succeeded clauses.
 
 covered(Succeeded, Failed) :-
-    findall(Cl, (entered(Cl), \+exited(Cl)), Failed0),
-    findall(Cl, exited(Cl), Succeeded0),
+    findall(Cl, ('$cov_data'(clause(Cl), Enter, 0), Enter > 0), Failed0),
+    findall(Cl, ('$cov_data'(clause(Cl), _, Exit), Exit > 0), Succeeded0),
     sort(Failed0, Failed),
     sort(Succeeded0, Succeeded).
 
@@ -478,8 +315,7 @@ line_annotation(File, uncovered, Clause, Annotation) :-
 line_annotation(File, covered, Clause, [(Line-Annot)-Len|CallSites]) :-
     clause_property(Clause, file(File)),
     clause_property(Clause, line_count(Line)),
-    entered(Clause, Entered),
-    exited(Clause, Exited),
+    '$cov_data'(clause(Clause), Entered, Exited),
     counts_annotation(Entered, Exited, Annot, Len),
     findall(((CSLine-CSAnnot)-CSLen)-PC,
             clause_call_site_annotation(Clause, PC, CSLine, CSAnnot, CSLen),
@@ -529,8 +365,7 @@ print_clause_line((Module:Name/Arity)-Lines):-
 
 clause_call_site_annotation(ClauseRef, NextPC, Line, Annot, Len) :-
     clause_call_site(ClauseRef, PC-NextPC, Line:_LPos),
-    (   count(cover_enter, call_site(ClauseRef, NextPC, PI), Entered),
-        count(cover_exits, call_site(ClauseRef, NextPC, PI), Exited)
+    (   '$cov_data'(call_site(ClauseRef, NextPC, _PI), Entered, Exited)
     ->  counts_annotation(Entered, Exited, Annot, Len)
     ;   '$fetch_vm'(ClauseRef, PC, _, VMI),
         \+ no_annotate_call_site(VMI)
@@ -577,7 +412,7 @@ file_text(File, String) :-
         close(In)).
 
 check_covered_call_sites(Clause, Reported) :-
-    findall(PC, (count(_,call_site(Clause,PC,_), Count), Count > 0), Seen),
+    findall(PC, ('$cov_data'(call_site(Clause,PC,_), Enter, _), Enter > 0), Seen),
     sort(Reported, SReported),
     sort(Seen, SSeen),
     ord_subtract(SSeen, SReported, Missed),
