@@ -50,8 +50,8 @@
 
 /** <module> Unit Testing
 
-Unit testing environment for SWI-Prolog and   SICStus Prolog. For usage,
-please visit http://www.swi-prolog.org/pldoc/package/plunit.
+Unit testing environment for SWI-Prolog and SICStus Prolog. For usage,
+please visit http://www.swi-prolog.org/pldoc/package/plunit
 */
 
 :- autoload(library(apply), [maplist/3,include/3]).
