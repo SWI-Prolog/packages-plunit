@@ -39,7 +39,6 @@
             show_coverage/2             % :Goal, +Modules
           ]).
 :- autoload(library(apply), [exclude/3, maplist/2, convlist/3]).
-:- autoload(library(edinburgh), [nodebug/0]).
 :- autoload(library(ordsets),
             [ord_intersect/2, ord_intersection/3, ord_subtract/3]).
 :- autoload(library(pairs), [group_pairs_by_key/2]).
