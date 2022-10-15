@@ -237,8 +237,8 @@ summary(String, MaxLen, Summary) :-
     ).
 
 
-%!  clause_source(+Clause, -File, -Line) is det.
-%!  clause_source(-Clause, +File, -Line) is det.
+%!  clause_source(+Clause, -File, -Line) is semidet.
+%!  clause_source(-Clause, +File, -Line) is semidet.
 
 clause_source(Clause, File, Line) :-
     nonvar(Clause),
