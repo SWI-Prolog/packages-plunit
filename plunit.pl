@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2006-2021, University of Amsterdam
+    Copyright (c)  2006-2022, University of Amsterdam
 			      VU University Amsterdam
 			      CWI, Amsterdam
 			      SWI-Prolog Solutions b.v.
@@ -627,23 +627,31 @@ run_unit(Spec) :-
     ->  info(plunit(blocked(unit(Unit, Reason))))
     ;   setup(Module, unit(Unit), UnitOptions)
     ->  info(plunit(begin(Spec))),
-        current_test_flag(test_options, GlobalOptions),
-        (   option(concurrent(true), GlobalOptions),
-            option(concurrent(true), UnitOptions, false)
-        ->  concurrent_forall((Module:'unit test'(Name, Line, Options, Body),
-                               matching_test(Name, Tests)),
-                              run_test(Unit, Name, Line, Options, Body))
-        ;   forall((Module:'unit test'(Name, Line, Options, Body),
-                    matching_test(Name, Tests)),
-                   run_test(Unit, Name, Line, Options, Body))),
-        info(plunit(end(Spec))),
-        (   message_level(silent)
-        ->  true
-        ;   format(user_error, '~N', [])
-        ),
-        cleanup(Module, UnitOptions)
+	run_unit_2(Unit, Tests, Module, UnitOptions),
+	info(plunit(end(Spec))),
+	(   message_level(silent)
+	->  true
+	;   format(user_error, '~N', [])
+	),
+	cleanup(Module, UnitOptions)
     ;   true
     ).
+
+:- if(current_prolog_flag(threads, true)).
+run_unit_2(Unit, Tests, Module, UnitOptions) :-
+    option(concurrent(true), UnitOptions, false),
+    current_test_flag(test_options, GlobalOptions),
+    option(concurrent(true), GlobalOptions),
+    !,
+    concurrent_forall((Module:'unit test'(Name, Line, Options, Body),
+		       matching_test(Name, Tests)),
+		      run_test(Unit, Name, Line, Options, Body)).
+:- endif.
+run_unit_2(Unit, Tests, Module, _UnitOptions) :-
+    forall(( Module:'unit test'(Name, Line, Options, Body),
+	     matching_test(Name, Tests)),
+	   run_test(Unit, Name, Line, Options, Body)).
+
 
 unit_from_spec(Unit, Unit, _, Module, Options) :-
     atom(Unit),
