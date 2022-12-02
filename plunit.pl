@@ -61,6 +61,7 @@ please visit http://www.swi-prolog.org/pldoc/package/plunit.
 :- autoload(library(pairs), [group_pairs_by_key/2,pairs_values/2]).
 :- autoload(library(error), [must_be/2]).
 :- autoload(library(thread), [concurrent_forall/2]).
+:- autoload(library(aggregate), [aggregate_all/3]).
 
 :- meta_predicate valid_options(+, 1).
 
@@ -598,7 +599,7 @@ run_tests :-
 run_current_units :-
     forall(current_test_set(Set),
 	   run_unit(Set)),
-    check_for_test_errors.
+    all_tests_passed(_).
 
 report_and_cleanup(Ref) :-
     cleanup_trap_assertions(Ref),
@@ -614,7 +615,7 @@ run_tests(Set) :-
 
 run_unit_and_check_errors(Set) :-
     run_unit(Set),
-    check_for_test_errors.
+    all_tests_passed(_).
 
 run_unit([]) :- !.
 run_unit([H|T]) :-
@@ -626,9 +627,13 @@ run_unit(Spec) :-
     (   option(blocked(Reason), UnitOptions)
     ->  info(plunit(blocked(unit(Unit, Reason))))
     ;   setup(Module, unit(Unit), UnitOptions)
-    ->  info(plunit(begin(Spec))),
+    ->  get_time(T0),
+	info(plunit(begin(Spec))),
 	run_unit_2(Unit, Tests, Module, UnitOptions),
-	info(plunit(end(Spec))),
+	get_time(T1),
+	test_summary(Unit, Summary),
+	Time is T1-T0,
+	info(plunit(end(Spec, Summary.put(time, Time)))),
 	(   message_level(silent)
 	->  true
 	;   format(user_error, '~N', [])
@@ -1287,33 +1292,47 @@ current_test(Unit, Test, Line, Body, Options) :-
     current_unit(Unit, Module, _Supers, _UnitOptions),
     Module:'unit test'(Test, Line, Options, Body).
 
-%!  check_for_test_errors is semidet.
+:- meta_predicate count(0, -).
+count(Goal, Count) :-
+    aggregate_all(count, Goal, Count).
+
+%!  test_summary(?Unit, -Summary) is det.
 %
-%   True if there are no errors, otherwise false.
+%   True if there are no failures, otherwise false.
 
-check_for_test_errors :-
-    number_of_clauses(failed/4, Failed),
-    number_of_clauses(failed_assertion/7, FailedAssertion),
-    number_of_clauses(sto/4, STO),
-    Failed+FailedAssertion+STO =:= 0.     % fail on errors
+test_summary(Unit, Summary) :-
+    count(failed(Unit, _0Test, _0Line, _Reason), Failed),
+    count(failed_assertion(Unit, _0Test, _0Line,
+			   _ALoc, _STO, _0Reason, _Goal), FailedAssertion),
+    count(sto(Unit, _0Test, _0Line, _Results), STO),
+    count(passed(Unit, _0Test, _0Line, _Det, _Time), Passed),
+    count(blocked(Unit, _0Test, _0Line, _0Reason), Blocked),
+    Summary = plunit{passed:Passed,
+		     failed:Failed,
+		     failed_assertions:FailedAssertion,
+		     blocked:Blocked,
+		     sto:STO}.
 
+all_tests_passed(Unit) :-
+    test_summary(Unit, Summary),
+    test_summary_passed(Summary).
+
+test_summary_passed(Summary) :-
+    _{failed: 0, failed_assertions: 0, sto: 0} :< Summary.
 
 %!  report is det.
 %
 %   Print a summary of the tests that ran.
 
 report :-
-    number_of_clauses(passed/5, Passed),
-    number_of_clauses(failed/4, Failed),
-    number_of_clauses(failed_assertion/7, FailedAssertion),
-    number_of_clauses(blocked/4, Blocked),
-    number_of_clauses(sto/4, STO),
-    print_message(silent,
-		  plunit(summary(plunit{passed:Passed,
-					failed:Failed,
-					failed_assertions:FailedAssertion,
-					blocked:Blocked,
-					sto:STO}))),
+    test_summary(_, Summary),
+    print_message(silent, plunit(Summary)),
+    _{ passed:Passed,
+       failed:Failed,
+       failed_assertions:FailedAssertion,
+       blocked:Blocked,
+       sto:STO
+     } :< Summary,
     (   Passed+Failed+FailedAssertion+Blocked+STO =:= 0
     ->  info(plunit(no_tests))
     ;   Failed+FailedAssertion+Blocked+STO =:= 0
@@ -1504,12 +1523,17 @@ message(plunit(progress(_Unit, _Name, Result))) -->
     [ at_same_line ], result(Result), [flush].
 message(plunit(begin(Unit))) -->
     [ 'PL-Unit: ~w '-[Unit], flush ].
-message(plunit(end(_Unit))) -->
-    [ at_same_line, ' done' ].
+message(plunit(end(_Unit, Summary))) -->
+    [ at_same_line ],
+    (   {test_summary_passed(Summary)}
+    ->  [ ' passed' ]
+    ;   [ ansi(error, '**FAILED', []) ]
+    ),
+    [ ' ~3f sec'-[Summary.time] ].
 :- else.
 message(plunit(begin(Unit))) -->
     [ 'PL-Unit: ~w '-[Unit]/*, flush-[]*/ ].
-message(plunit(end(_Unit))) -->
+message(plunit(end(_Unit, _Summary))) -->
     [ ' done'-[] ].
 :- endif.
 message(plunit(blocked(unit(Unit, Reason)))) -->
