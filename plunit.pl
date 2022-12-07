@@ -45,16 +45,17 @@
 	    load_test_files/1,          % +Options
 	    running_tests/0,            % Prints currently running test
 	    current_test/5,             % ?Unit,?Test,?Line,?Body,?Options
-            current_test_unit/2,        % ?Unit,?Options
+	    current_test_unit/2,        % ?Unit,?Options
 	    test_report/1               % +What
-          ]).
+	  ]).
 
 /** <module> Unit Testing
 
 Unit testing environment for SWI-Prolog and   SICStus Prolog. For usage,
-please visit http://www.swi-prolog.org/pldoc/package/plunit.
+please visit https://www.swi-prolog.org/pldoc/package/plunit.
 */
 
+:- autoload(library(statistics), [call_time/2]).
 :- autoload(library(apply), [maplist/3,include/3]).
 :- autoload(library(lists), [member/2,append/2]).
 :- autoload(library(option), [option/3,option/2]).
@@ -194,7 +195,8 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
    ->  true
    ;   set_test_flag(test_options,
 		 [ run(make),       % run tests on make/0
-		   sto(false)
+		   sto(false),
+                   output(on_failure)
 		 ])
    ).
 
@@ -202,35 +204,39 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
 %
 %   Specifies how to deal with test suites.  Defined options are:
 %
-%           * load(+Load)
-%           Whether or not the tests must be loaded.  Values are
-%           =never=, =always=, =normal= (only if not optimised)
+%    - load(+Load)
+%      Whether or not the tests must be loaded.  Values are
+%      `never`, `always`, `normal` (only if not optimised)
 %
-%           * run(+When)
-%           When the tests are run.  Values are =manual=, =make=
-%           or make(all).
+%    - run(+When)
+%      When the tests are run.  Values are `manual`, `make`
+%      or make(all).
 %
-%           * silent(+Bool)
-%           If =true= (default =false=), report successful tests
-%           using message level =silent=, only printing errors and
-%           warnings.
+%    - silent(+Bool)
+%      If `true` (default `false`), report successful tests
+%      using message level `silent`, only printing errors and
+%      warnings.
 %
-%           * sto(+Bool)
-%           How to test whether code is subject to occurs check
-%           (STO).  If =false= (default), STO is not considered.
-%           If =true= and supported by the hosting Prolog, code
-%           is run in all supported unification mode and reported
-%           if the results are inconsistent.
+%    - output(+When)
+%      If `always`, emit all output as it is produced, if `never`,
+%      suppress all output and if `on_failure`, emit the output
+%      if the test fails.
 %
-%           * cleanup(+Bool)
-%           If =true= (default =false), cleanup report at the end
-%           of run_tests/1.  Used to improve cooperation with
-%           memory debuggers such as dmalloc.
+%    - sto(+Bool)
+%      How to test whether code is subject to occurs check
+%      (STO).  If `false` (default), STO is not considered.
+%      If `true` and supported by the hosting Prolog, code
+%      is run in all supported unification mode and reported
+%      if the results are inconsistent.
 %
-%           * concurrent(+Bool)
-%           If =true= (default =false), run all tests in a block
-%           concurrently.
+%    - cleanup(+Bool)
+%      If `true` (default =false), cleanup report at the end
+%      of run_tests/1.  Used to improve cooperation with
+%      memory debuggers such as dmalloc.
 %
+%    - concurrent(+Bool)
+%      If `true` (default `false`), run all tests in a unit
+%      concurrently.
 
 set_test_options(Options) :-
     valid_options(Options, global_test_option),
@@ -238,6 +244,8 @@ set_test_options(Options) :-
 
 global_test_option(load(Load)) :-
     must_be(oneof([never,always,normal]), Load).
+global_test_option(output(Cond)) :-
+    must_be(oneof([always,never, on_failure]), Cond).
 global_test_option(run(When)) :-
     must_be(oneof([manual,make,make(all)]), When).
 global_test_option(silent(Bool)) :-
@@ -563,14 +571,31 @@ test_set_option(sto(V)) :-
 test_set_option(concurrent(V)) :-
     must_be(boolean, V).
 
+		 /*******************************
+		 *             UTIL		*
+		 *******************************/
+
+:- meta_predicate reify(0, -).
+
+%!  reify(:Goal, -Result) is det.
+
+reify(Goal, Result) :-
+    (   catch(Goal, E, true)
+    ->  (   var(E)
+	->  Result = true
+	;   Result = throw(E)
+	)
+    ;   Result = false
+    ).
 
 		 /*******************************
 		 *        RUNNING TOPLEVEL      *
 		 *******************************/
 
 :- thread_local
+    test_count/1,                   % Count
     passed/5,                       % Unit, Test, Line, Det, Time
-    failed/4,                       % Unit, Test, Line, Reason
+    failed/5,                       % Unit, Test, Line, Reason, Time
     failed_assertion/7,             % Unit, Test, Line, ALoc, STO, Reason, Goal
     blocked/4,                      % Unit, Test, Line, Reason
     sto/4,                          % Unit, Test, Line, Results
@@ -591,28 +616,22 @@ test_set_option(concurrent(V)) :-
 %   within a unit.
 
 run_tests :-
+    findall(Unit, current_test_unit(Unit,_), Units),
+    run_tests(Units).
+
+run_tests(Set) :-
     cleanup,
+    count_tests(Set, Count),
+    asserta(test_count(Count)),
     setup_call_cleanup(
 	setup_trap_assertions(Ref),
-	run_current_units,
+	run_unit_and_check_errors(Set),
 	report_and_cleanup(Ref)).
-
-run_current_units :-
-    forall(current_test_set(Set),
-	   run_unit(Set)),
-    all_tests_passed(_).
 
 report_and_cleanup(Ref) :-
     cleanup_trap_assertions(Ref),
     report,
     cleanup_after_test.
-
-run_tests(Set) :-
-    cleanup,
-    setup_call_cleanup(
-	setup_trap_assertions(Ref),
-	run_unit_and_check_errors(Set),
-	report_and_cleanup(Ref)).
 
 run_unit_and_check_errors(Set) :-
     run_unit(Set),
@@ -627,21 +646,48 @@ run_unit(Spec) :-
     unit_from_spec(Spec, Unit, Tests, Module, UnitOptions),
     (   option(blocked(Reason), UnitOptions)
     ->  info(plunit(blocked(unit(Unit, Reason))))
-    ;   setup(Module, unit(Unit), UnitOptions)
-    ->  get_time(T0),
-	info(plunit(begin(Spec))),
-	run_unit_2(Unit, Tests, Module, UnitOptions),
-	get_time(T1),
-	test_summary(Unit, Summary),
-	Time is T1-T0,
-	info(plunit(end(Spec, Summary.put(time, Time)))),
-	(   message_level(silent)
-	->  true
-	;   format(user_error, '~N', [])
-	),
-	cleanup(Module, UnitOptions)
+    ;   condition(Module, unit(Unit), UnitOptions)
+    ->  (   setup(Module, unit(Unit), UnitOptions)
+        ->  info(plunit(begin(Spec))),
+            call_time(run_unit_2(Unit, Tests, Module, UnitOptions), Time),
+            test_summary(Unit, Summary),
+            info(plunit(end(Spec, Summary.put(time, Time)))),
+            cleanup(Module, UnitOptions)
+        )
     ;   true
     ).
+
+%!  count_tests(+Spec, -Count) is det.
+%
+%   Count the number of tests to run.
+
+count_tests(Spec, Count) :-
+    count_tests(Spec, 0, Count).
+
+count_tests([], Count, Count) :-
+    !.
+count_tests([H|T], Count0, Count) :-
+    !,
+    count_tests(H, Count0, Count1),
+    count_tests(T, Count1, Count).
+count_tests(Spec, Count0, Count) :-
+    unit_from_spec(Spec, Unit, Tests, _Module, UnitOptions),
+    (   option(blocked(_Reason), UnitOptions)
+    ->  Count = Count0
+    ;   var(Tests)
+    ->  count(current_test(Unit,_,_,_,_), N),
+	Count is Count0+N
+    ;   atom(Tests),
+	current_test(Unit,Tests,_,_,_)
+    ->  Count is Count0+1
+    ;   is_list(Tests)
+    ->  count((member(T, Tests), current_test(Unit,T,_,_,_)), N),
+	Count is Count0+N
+    ;   Count = Count0
+    ).
+
+
+
 
 :- if(current_prolog_flag(threads, true)).
 run_unit_2(Unit, Tests, Module, UnitOptions) :-
@@ -682,8 +728,9 @@ matching_test(Name, Set) :-
 
 cleanup :-
     thread_self(Me),
+    retractall(test_count(_)),
     retractall(passed(_, _, _, _, _)),
-    retractall(failed(_, _, _, _)),
+    retractall(failed(_, _, _, _, _)),
     retractall(failed_assertion(_, _, _, _, _, _, _)),
     retractall(blocked(_, _, _, _)),
     retractall(sto(_, _, _, _)),
@@ -877,7 +924,8 @@ run_test_cap(Unit, Name, Line, Options, Body) :-
 	report_result(Result, Options)
     ;   findall(Key-(Type+Result),
 		test_caps(Type, Unit, Name, Line, Options, Body, Result, Key),
-		Pairs),
+		Pairs0),
+        keysort(Pairs0, Pairs),
 	group_pairs_by_key(Pairs, Keyed),
 	(   Keyed == []
 	->  true
@@ -898,24 +946,29 @@ test_caps(Type, Unit, Name, Line, Options, Body, Result, Key) :-
     run_test_6(Unit, Name, Line, Options, Body, Result),
     end_test(Unit, Name, Line, Type),
     result_to_key(Result, Key),
-    Key \== setup_failed.
+    Key \== setup_failed,
+    Key \== condition_failed.
 
+:- det(result_to_key/2).
 result_to_key(blocked(_, _, _, _), blocked).
-result_to_key(failure(_, _, _, How0), failure(How1)) :-
+result_to_key(failure(_, _, _, How0, _), failure(How1)) :-
     ( How0 = succeeded(_T) -> How1 = succeeded ; How0 = How1 ).
 result_to_key(success(_, _, _, Determinism, _), success(Determinism)).
 result_to_key(setup_failed(_,_,_), setup_failed).
+result_to_key(condition_failed(_,_,_), condition_failed).
 
+:- det(report_result/2).
 report_result(blocked(Unit, Name, Line, Reason), _) :-
     !,
     assert(blocked(Unit, Name, Line, Reason)).
-report_result(failure(Unit, Name, Line, How), Options) :-
+report_result(failure(Unit, Name, Line, How, Time), Options) :-
     !,
-    failure(Unit, Name, Line, How, Options).
+    failure(Unit, Name, Line, How, Time, Options).
 report_result(success(Unit, Name, Line, Determinism, Time), Options) :-
     !,
     success(Unit, Name, Line, Determinism, Time, Options).
 report_result(setup_failed(_Unit, _Name, _Line), _Options).
+report_result(condition_failed(_Unit, _Name, _Line), _Options).
 report_result(sto(Unit, Name, Line, ResultByType), Options) :-
     assert(sto(Unit, Name, Line, ResultByType)),
     print_message(error, plunit(sto(Unit, Name, Line))),
@@ -931,15 +984,30 @@ report_sto_results([Type+Result|T], Options) :-
 %
 %   Result is one of:
 %
-%           * blocked(Unit, Name, Line, Reason)
-%           * failure(Unit, Name, Line, How)
-%           * success(Unit, Name, Line, Determinism, Time)
-%           * setup_failed(Unit, Name, Line)
+%     - blocked(Unit, Name, Line, Reason)
+%     - condition_failed(Unit, Name, Line)
+%     - failure(Unit, Name, Line, How, Time)
+%       How is one of:
+%       - succeeded
+%       - Exception
+%       - cmp_error(Cmp, E)
+%       - wrong_answer(Cmp)
+%       - failed
+%       - no_exception
+%       - wrong_error(Expect, E)
+%       - wrong_answer(Expected, Bindings)
+%     - success(Unit, Name, Line, Determinism, Time)
+%     - setup_failed(Unit, Name, Line)
 
 run_test_6(Unit, Name, Line, Options, _Body,
 	   blocked(Unit, Name, Line, Reason)) :-
     option(blocked(Reason), Options),
     !.
+run_test_6(Unit, Name, Line, Options, _Body, Result) :-
+    unit_module(Unit, Module),
+    \+ condition(Module, test(Unit,Name,Line), Options),
+    !,
+    Result = condition_failed(Unit, Name, Line).
 run_test_6(Unit, Name, Line, Options, Body, Result) :-
     option(all(Answer), Options),                  % all(Bindings)
     !,
@@ -949,75 +1017,63 @@ run_test_6(Unit, Name, Line, Options, Body, Result) :-
     !,
     nondet_test(set(Answer), Unit, Name, Line, Options, Body, Result).
 run_test_6(Unit, Name, Line, Options, Body, Result) :-
+    option(setup(_Setup), Options),
+    !,
+    (   unit_module(Unit, Module),
+        setup(Module, test(Unit,Name,Line), Options)
+    ->  run_test_7(Unit, Name, Line, Options, Body, Result),
+        cleanup(Module, Options)
+    ;   Result = setup_failed(Unit, Name, Line)
+    ).
+run_test_6(Unit, Name, Line, Options, Body, Result) :-
+    unit_module(Unit, Module),
+    run_test_7(Unit, Name, Line, Options, Body, Result),
+    cleanup(Module, Options).
+
+run_test_7(Unit, Name, Line, Options, Body, Result) :-
     option(fail, Options),                         % fail
     !,
     unit_module(Unit, Module),
-    (   setup(Module, test(Unit,Name,Line), Options)
-    ->  statistics(runtime, [T0,_]),
-	(   catch(Module:Body, E, true)
-	->  (   var(E)
-	    ->  statistics(runtime, [T1,_]),
-		Time is (T1 - T0)/1000.0,
-		Result = failure(Unit, Name, Line, succeeded(Time)),
-		cleanup(Module, Options)
-	    ;   Result = failure(Unit, Name, Line, E),
-		cleanup(Module, Options)
-	    )
-	;   statistics(runtime, [T1,_]),
-	    Time is (T1 - T0)/1000.0,
-	    Result = success(Unit, Name, Line, true, Time),
-	    cleanup(Module, Options)
-	)
-    ;   Result = setup_failed(Unit, Name, Line)
+    call_time(reify(Module:Body, Result0), Time),
+    (   Result0 == true
+    ->  Result = failure(Unit, Name, Line, succeeded, Time)
+    ;   Result0 == false
+    ->  Result = success(Unit, Name, Line, true, Time)
+    ;   Result0 = throw(E)
+    ->  Result = failure(Unit, Name, Line, E, Time)
     ).
-run_test_6(Unit, Name, Line, Options, Body, Result) :-
+run_test_7(Unit, Name, Line, Options, Body, Result) :-
     option(true(Cmp), Options),
     !,
     unit_module(Unit, Module),
-    (   setup(Module, test(Unit,Name,Line), Options) % true(Binding)
-    ->  statistics(runtime, [T0,_]),
-	(   catch(call_det(Module:Body, Det), E, true)
-	->  (   var(E)
-	    ->  statistics(runtime, [T1,_]),
-		Time is (T1 - T0)/1000.0,
-		(   catch(Module:Cmp, E, true)
-		->  (   var(E)
-		    ->  Result = success(Unit, Name, Line, Det, Time)
-		    ;   Result = failure(Unit, Name, Line, cmp_error(Cmp, E))
-		    )
-		;   Result = failure(Unit, Name, Line, wrong_answer(Cmp))
-		),
-		cleanup(Module, Options)
-	    ;   Result = failure(Unit, Name, Line, E),
-		cleanup(Module, Options)
-	    )
-	;   Result = failure(Unit, Name, Line, failed),
-	    cleanup(Module, Options)
-	)
-    ;   Result = setup_failed(Unit, Name, Line)
+    call_time(reify(call_det(Module:Body, Det), Result0), Time),
+    (   Result0 == true
+    ->  (   catch(Module:Cmp, E, true)
+        ->  (  var(E)
+            ->  Result = success(Unit, Name, Line, Det, Time)
+            ;   Result = failure(Unit, Name, Line, cmp_error(Cmp, E), Time)
+            )
+        ;   Result = failure(Unit, Name, Line, wrong_answer(Cmp), Time)
+        )
+    ;   Result0 == false
+    ->  Result = failure(Unit, Name, Line, failed, Time)
+    ;   Result0 = throw(E2)
+    ->  Result = failure(Unit, Name, Line, E2, Time)
     ).
-run_test_6(Unit, Name, Line, Options, Body, Result) :-
+run_test_7(Unit, Name, Line, Options, Body, Result) :-
     option(throws(Expect), Options),
     !,
     unit_module(Unit, Module),
-    (   setup(Module, test(Unit,Name,Line), Options)
-    ->  statistics(runtime, [T0,_]),
-	(   catch(Module:Body, E, true)
-	->  (   var(E)
-	    ->  Result = failure(Unit, Name, Line, no_exception),
-		cleanup(Module, Options)
-	    ;   statistics(runtime, [T1,_]),
-		Time is (T1 - T0)/1000.0,
-		(   match_error(Expect, E)
-		->  Result = success(Unit, Name, Line, true, Time)
-		;   Result = failure(Unit, Name, Line, wrong_error(Expect, E))
-		),
-		cleanup(Module, Options)
-	    )
-	;   Result = failure(Unit, Name, Line, failed),
-	    cleanup(Module, Options)
-	)
-    ;   Result = setup_failed(Unit, Name, Line)
+    call_time(reify(Module:Body, Result0), Time),
+    (   Result0 == true
+    ->  Result = failure(Unit, Name, Line, no_exception, Time)
+    ;   Result0 == false
+    ->  Result = failure(Unit, Name, Line, failed, Time)
+    ;   Result0 = throw(E)
+    ->  (   match_error(Expect, E)
+        ->  Result = success(Unit, Name, Line, true, Time)
+        ;   Result = failure(Unit, Name, Line, wrong_error(Expect, E), Time)
+        )
     ).
 
 
@@ -1028,20 +1084,17 @@ run_test_6(Unit, Name, Line, Options, Body, Result) :-
 nondet_test(Expected, Unit, Name, Line, Options, Body, Result) :-
     unit_module(Unit, Module),
     result_vars(Expected, Vars),
-    statistics(runtime, [T0,_]),
     (   setup(Module, test(Unit,Name,Line), Options)
-    ->  (   catch(findall(Vars, Module:Body, Bindings), E, true)
-	->  (   var(E)
-	    ->  statistics(runtime, [T1,_]),
-		Time is (T1 - T0)/1000.0,
-		(   nondet_compare(Expected, Bindings, Unit, Name, Line)
+    ->  (   call_time(reify(findall(Vars, Module:Body, Bindings), Result0), Time)
+	->  (   Result0 == true
+	    ->  (   nondet_compare(Expected, Bindings, Unit, Name, Line)
 		->  Result = success(Unit, Name, Line, true, Time)
-		;   Result = failure(Unit, Name, Line, wrong_answer(Expected, Bindings))
-		),
-		cleanup(Module, Options)
-	    ;   Result = failure(Unit, Name, Line, E),
-		cleanup(Module, Options)
-	    )
+		;   Result = failure(Unit, Name, Line, wrong_answer(Expected, Bindings), Time)
+		)
+	    ;   Result0 = throw(E)
+	    ->  Result = failure(Unit, Name, Line, E, Time)
+	    ),
+	    cleanup(Module, Options)
 	)
     ;   Result = setup_failed(Unit, Name, Line)
     ).
@@ -1120,17 +1173,11 @@ match_error(Expect, Rec) :-
 %   reason. The condition handler is  similar,   but  failing is not
 %   considered an error.  Context is one of
 %
-%       * unit(Unit)
-%       If it is the setup handler for a unit
-%       * test(Unit,Name,Line)
-%       If it is the setup handler for a test
+%    - unit(Unit)
+%      If it is the setup handler for a unit
+%    - test(Unit,Name,Line)
+%      If it is the setup handler for a test
 
-setup(Module, Context, Options) :-
-    option(condition(Condition), Options),
-    option(setup(Setup), Options),
-    !,
-    setup(Module, Context, [condition(Condition)]),
-    setup(Module, Context, [setup(Setup)]).
 setup(Module, Context, Options) :-
     option(setup(Setup), Options),
     !,
@@ -1143,10 +1190,16 @@ setup(Module, Context, Options) :-
     ;   print_message(error, error(goal_failed(Setup), _)),
 	fail
     ).
-setup(Module, Context, Options) :-
-    option(condition(Setup), Options),
+setup(_,_,_).
+
+%!  condition(+Module, +Context, +Options) is semidet.
+%
+%   Evaluate the test or test unit condition.
+
+condition(Module, Context, Options) :-
+    option(condition(Cond), Options),
     !,
-    (   catch(call_ex(Module, Setup), E, true)
+    (   catch(call_ex(Module, Cond), E, true)
     ->  (   var(E)
 	->  true
 	;   print_message(error, plunit(error(condition, Context, E))),
@@ -1154,7 +1207,8 @@ setup(Module, Context, Options) :-
 	)
     ;   fail
     ).
-setup(_,_,_).
+condition(_, _, _).
+
 
 %!  call_ex(+Module, +Goal)
 %
@@ -1179,41 +1233,45 @@ cleanup(Module, Options) :-
     ;   print_message(warning, goal_failed(Cleanup, '(cleanup handler)'))
     ).
 
-success(Unit, Name, Line, Det, _Time, Options) :-
+success(Unit, Name, Line, Det, Time, Options) :-
     memberchk(fixme(Reason), Options),
     !,
     (   (   Det == true
 	;   memberchk(nondet, Options)
 	)
-    ->  progress(Unit, Name, nondet),
+    ->  progress(Unit, Name, nondet, Time),
 	Ok = passed
-    ;   progress(Unit, Name, fixme),
+    ;   progress(Unit, Name, fixme, Time),
 	Ok = nondet
     ),
     flush_output(user_error),
     assert(fixme(Unit, Name, Line, Reason, Ok)).
-success(Unit, Name, Line, _, _, Options) :-
+success(Unit, Name, Line, _, Time, Options) :-
     failed_assertion(Unit, Name, Line, _,_,_,_),
     !,
-    failure(Unit, Name, Line, assertion, Options).
+    failure(Unit, Name, Line, assertion, Time, Options).
 success(Unit, Name, Line, Det, Time, Options) :-
     assert(passed(Unit, Name, Line, Det, Time)),
     (   (   Det == true
 	;   memberchk(nondet, Options)
 	)
-    ->  progress(Unit, Name, passed)
+    ->  progress(Unit, Name, passed, Time)
     ;   unit_file(Unit, File),
 	print_message(warning, plunit(nondet(File, Line, Name)))
     ).
 
-failure(Unit, Name, Line, _, Options) :-
+%!  failure(+Unit, +Name, +Line, +How, +Time, +Options) is det.
+%
+%   Test failed.  Report the error.
+
+failure(Unit, Name, Line, _, Time, Options) :-
     memberchk(fixme(Reason), Options),
     !,
-    progress(Unit, Name, failed),
+    progress(Unit, Name, failed, Time),
     assert(fixme(Unit, Name, Line, Reason, failed)).
-failure(Unit, Name, Line, E, Options) :-
-    report_failure(Unit, Name, Line, E, Options),
-    assert_cyclic(failed(Unit, Name, Line, E)).
+failure(Unit, Name, Line, E, Time, Options) :-
+    report_failure(Unit, Name, Line, E, Time, Options),
+    assert_cyclic(failed(Unit, Name, Line, E, Time)).
 
 %!  assert_cyclic(+Term) is det.
 %
@@ -1310,11 +1368,11 @@ count(Goal, Count) :-
 %   True if there are no failures, otherwise false.
 
 test_summary(Unit, Summary) :-
-    count(failed(Unit, _0Test, _0Line, _Reason), Failed),
+    count(failed(Unit, _0Test, _0Line, _Reason, _0Time), Failed),
     count(failed_assertion(Unit, _0Test, _0Line,
 			   _ALoc, _STO, _0Reason, _Goal), FailedAssertion),
     count(sto(Unit, _0Test, _0Line, _Results), STO),
-    count(passed(Unit, _0Test, _0Line, _Det, _Time), Passed),
+    count(passed(Unit, _0Test, _0Line, _Det, _0Time), Passed),
     count(blocked(Unit, _0Test, _0Line, _0Reason), Blocked),
     Summary = plunit{passed:Passed,
 		     failed:Failed,
@@ -1377,7 +1435,7 @@ report_blocked :-
 report_blocked.
 
 report_failed :-
-    number_of_clauses(failed/4, N),
+    number_of_clauses(failed/5, N),
     info(plunit(failed(N))).
 
 report_failed_assertions :-
@@ -1404,10 +1462,10 @@ fixme(How, Tuples, Count) :-
     length(Tuples, Count).
 
 
-report_failure(Unit, Name, _, assertion, _) :-
+report_failure(Unit, Name, _, assertion, Time, _) :-
     !,
-    progress(Unit, Name, assertion).
-report_failure(Unit, Name, Line, Error, _Options) :-
+    progress(Unit, Name, assertion, Time).
+report_failure(Unit, Name, Line, Error, _Time, _Options) :-
     print_message(error, plunit(failed(Unit, Name, Line, Error))).
 
 
@@ -1489,8 +1547,8 @@ info(Term) :-
     message_level(Level),
     print_message(Level, Term).
 
-progress(Unit, Name, Result) :-
-    print_message(information, plunit(progress(Unit, Name, Result))).
+progress(Unit, Name, Result, Time) :-
+    print_message(information, plunit(progress(Unit, Name, Result, Time))).
 
 message_level(Level) :-
     current_test_flag(test_options, Options),
@@ -1529,7 +1587,7 @@ message(error(plunit(incompatible_options, Tests), _)) -->
 
 					% Unit start/end
 :- if(swi).
-message(plunit(progress(_Unit, _Name, Result))) -->
+message(plunit(progress(_Unit, _Name, Result, _Time))) -->
     [ at_same_line ], result(Result), [flush].
 message(plunit(begin(Unit))) -->
     [ 'PL-Unit: ~w '-[Unit], flush ].
@@ -1539,7 +1597,7 @@ message(plunit(end(_Unit, Summary))) -->
     ->  [ ' passed' ]
     ;   [ ansi(error, '**FAILED', []) ]
     ),
-    [ ' ~3f sec'-[Summary.time] ].
+    [ ' ~3f sec'-[Summary.time.cpu] ].
 :- else.
 message(plunit(begin(Unit))) -->
     [ 'PL-Unit: ~w '-[Unit]/*, flush-[]*/ ].
@@ -1725,7 +1783,7 @@ sto_type(finite_trees) -->
 
 sto_result(success(_Unit, _Name, _Line, Det, Time)) -->
     det(Det),
-    [ ' success in ~2f seconds'-[Time] ].
+    [ ' success in ~3f seconds'-[Time.cpu] ].
 sto_result(failure(_Unit, _Name, _Line, How)) -->
     failure(How).
 
@@ -1823,7 +1881,7 @@ failure(Error) -->
     [ 'received error: ~w'-[Message] ].
 :- endif.
 failure(Why) -->
-    [ '~p~n'-[Why] ].
+    [ '~p'-[Why] ].
 
 fixme_message([]) --> [].
 fixme_message([fixme(Unit, _Name, Line, Reason, How)|T]) -->
