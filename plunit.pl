@@ -45,8 +45,9 @@
 	    load_test_files/1,          % +Options
 	    running_tests/0,            % Prints currently running test
 	    current_test/5,             % ?Unit,?Test,?Line,?Body,?Options
+            current_test_unit/2,        % ?Unit,?Options
 	    test_report/1               % +What
-	  ]).
+          ]).
 
 /** <module> Unit Testing
 
@@ -1284,13 +1285,21 @@ running_tests(Running) :-
 	    ), Running).
 
 
-%!  current_test(?Unit, ?Test, ?Line, ?Body, ?Options)
+%!  current_test(?Unit, ?Test, ?Line, ?Body, ?Options) is nondet.
 %
 %   True when a test with the specified properties is loaded.
 
 current_test(Unit, Test, Line, Body, Options) :-
     current_unit(Unit, Module, _Supers, _UnitOptions),
     Module:'unit test'(Test, Line, Options, Body).
+
+%!  current_test_unit(?Unit, ?Options) is nondet.
+%
+%   True when a Unit is a current unit test declared with Options.
+
+current_test_unit(Unit, UnitOptions) :-
+    current_unit(Unit, _Module, _Supers, UnitOptions).
+
 
 :- meta_predicate count(0, -).
 count(Goal, Count) :-
@@ -1402,9 +1411,10 @@ report_failure(Unit, Name, Line, Error, _Options) :-
     print_message(error, plunit(failed(Unit, Name, Line, Error))).
 
 
-%!  test_report(What) is det.
+%!  test_report(+What) is det.
 %
-%   Produce reports on test results after the run.
+%   Produce reports on test  results  after   the  run.  Currently  only
+%   supports `fixme` for What.
 
 test_report(fixme) :-
     !,
