@@ -64,6 +64,8 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 :- autoload(library(error), [must_be/2]).
 :- autoload(library(thread), [concurrent_forall/2]).
 :- autoload(library(aggregate), [aggregate_all/3]).
+:- autoload(library(streams), [with_output_to/3]).
+:- autoload(library(ansi_term), [ansi_format/3]).
 
 :- meta_predicate valid_options(+, 1).
 
@@ -194,10 +196,10 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
    (   current_test_flag(test_options, _)
    ->  true
    ;   set_test_flag(test_options,
-		 [ run(make),       % run tests on make/0
-		   sto(false),
-                   output(on_failure)
-		 ])
+                     [ run(make),       % run tests on make/0
+                       sto(false),
+                       output(on_failure)
+                     ])
    ).
 
 %!  set_test_options(+Options)
@@ -575,7 +577,9 @@ test_set_option(concurrent(V)) :-
 		 *             UTIL		*
 		 *******************************/
 
-:- meta_predicate reify(0, -).
+:- meta_predicate
+       reify(0, -),
+       capture_output(0,-,+).
 
 %!  reify(:Goal, -Result) is det.
 
@@ -587,6 +591,15 @@ reify(Goal, Result) :-
 	)
     ;   Result = false
     ).
+
+capture_output(Goal, Output, Options) :-
+    option(output(How), Options, always),
+    (   How == always
+    ->  call(Goal)
+    ;   with_output_to(string(Output), Goal,
+                       [ capture([user_output, user_error])])
+    ).
+
 
 		 /*******************************
 		 *        RUNNING TOPLEVEL      *
@@ -675,7 +688,8 @@ count_tests(Spec, Count0, Count) :-
     (   option(blocked(_Reason), UnitOptions)
     ->  Count = Count0
     ;   var(Tests)
-    ->  count(current_test(Unit,_,_,_,_), N),
+    ->  count(( current_test(Unit,_,_,_,TestOptions),
+                \+ option(blocked(_), TestOptions)), N),
 	Count is Count0+N
     ;   atom(Tests),
 	current_test(Unit,Tests,_,_,_)
@@ -728,6 +742,7 @@ matching_test(Name, Set) :-
 
 cleanup :-
     thread_self(Me),
+    set_flag(plunit_test, 1),
     retractall(test_count(_)),
     retractall(passed(_, _, _, _, _)),
     retractall(failed(_, _, _, _, _)),
@@ -898,9 +913,10 @@ run_test_once(Unit, Name, Line, Options, Body) :-
     !,
     current_unification_capability(Type),
     begin_test(Unit, Name, Line, Type),
-    run_test_6(Unit, Name, Line, Options, Body, Result),
+    capture_output(run_test_6(Unit, Name, Line, Options, Body, Result),
+                   Output, GlobalOptions),
     end_test(Unit, Name, Line, Type),
-    report_result(Result, Options).
+    report_result(Result, Output, Options).
 run_test_once(Unit, Name, Line, Options, Body) :-
     current_unit(Unit, _Module, _Supers, UnitOptions),
     option(sto(Type), UnitOptions),
@@ -915,25 +931,29 @@ run_test_once(Unit, Name, Line, Options, Body) :-
 		 set_unification_capability(Cap0)).
 
 run_test_cap(Unit, Name, Line, Options, Body) :-
+    current_test_flag(test_options, GlobalOptions),
     (   option(sto(Type), Options)
     ->  unification_capability(Type),
 	set_unification_capability(Type),
 	begin_test(Unit, Name, Line, Type),
-	run_test_6(Unit, Name, Line, Options, Body, Result),
+	capture_output(run_test_6(Unit, Name, Line, Options, Body, Result),
+                       Output, GlobalOptions),
 	end_test(Unit, Name, Line, Type),
-	report_result(Result, Options)
-    ;   findall(Key-(Type+Result),
-		test_caps(Type, Unit, Name, Line, Options, Body, Result, Key),
-		Pairs0),
+	report_result(Result, Output, Options)
+    ;   findall(Key-(r(Type,Result,Output)),
+                capture_output(test_caps(Type, Unit, Name, Line,
+                                         Options, Body, Result, Key),
+                               Output, GlobalOptions),
+                Pairs0),
         keysort(Pairs0, Pairs),
 	group_pairs_by_key(Pairs, Keyed),
 	(   Keyed == []
 	->  true
 	;   Keyed = [_-Results]
-	->  Results = [_Type+Result|_],
-	    report_result(Result, Options)          % consistent results
+	->  Results = [r(_Type,Result,Output)|_],
+	    report_result(Result, Output, Options)          % consistent results
 	;   pairs_values(Pairs, ResultByType),
-	    report_result(sto(Unit, Name, Line, ResultByType), Options)
+	    report_result(sto(Unit, Name, Line, ResultByType), "", Options)
 	)
     ).
 
@@ -957,7 +977,12 @@ result_to_key(success(_, _, _, Determinism, _), success(Determinism)).
 result_to_key(setup_failed(_,_,_), setup_failed).
 result_to_key(condition_failed(_,_,_), condition_failed).
 
-:- det(report_result/2).
+:- det(report_result/3).
+report_result(Result, Output, Options) :-
+    current_test_flag(test_options, GlobalOptions),
+    print_test_output(Result, Output, GlobalOptions),
+    report_result(Result, Options).
+
 report_result(blocked(Unit, Name, Line, Reason), _) :-
     !,
     assert(blocked(Unit, Name, Line, Reason)).
@@ -975,13 +1000,25 @@ report_result(sto(Unit, Name, Line, ResultByType), Options) :-
     report_sto_results(ResultByType, Options).
 
 report_sto_results([], _).
-report_sto_results([Type+Result|T], Options) :-
+report_sto_results([r(Type,Result,Output)|T], Options) :-
+    print_test_output(Result, Output, Options),
     print_message(error, plunit(sto(Type, Result))),
     report_sto_results(T, Options).
+
+print_test_output(Result, Output, Options) :-
+    Output \== "",
+    option(output(on_failure), Options),
+    result_to_key(Result, Key),
+    Key \= success(_),
+    !,
+    ansi_format(code, '~N~s', [Output]).     % Use print_message(test(output), Output)?
+print_test_output(_, _, _).
 
 
 %!  run_test_6(+Unit, +Name, +Line, +Options, :Body, -Result) is det.
 %
+%   6th step  of the  tests.  Deals  with tests  that must  be ignored
+%   (blocked, conditions fails), setup and cleanup at the test level.
 %   Result is one of:
 %
 %     - blocked(Unit, Name, Line, Reason)
@@ -1009,14 +1046,6 @@ run_test_6(Unit, Name, Line, Options, _Body, Result) :-
     !,
     Result = condition_failed(Unit, Name, Line).
 run_test_6(Unit, Name, Line, Options, Body, Result) :-
-    option(all(Answer), Options),                  % all(Bindings)
-    !,
-    nondet_test(all(Answer), Unit, Name, Line, Options, Body, Result).
-run_test_6(Unit, Name, Line, Options, Body, Result) :-
-    option(set(Answer), Options),                  % set(Bindings)
-    !,
-    nondet_test(set(Answer), Unit, Name, Line, Options, Body, Result).
-run_test_6(Unit, Name, Line, Options, Body, Result) :-
     option(setup(_Setup), Options),
     !,
     (   unit_module(Unit, Module),
@@ -1030,20 +1059,15 @@ run_test_6(Unit, Name, Line, Options, Body, Result) :-
     run_test_7(Unit, Name, Line, Options, Body, Result),
     cleanup(Module, Options).
 
+%!  run_test_7(+Unit, +Name, +Line, +Options, :Body, -Result) is det.
+%
+%   This step  deals with the expected  outcome of the test.   It runs
+%   the  actual test  and then  compares  the result  to the  outcome.
+%   There are  two main categories:  dealing with a single  result and
+%   all results.
+
 run_test_7(Unit, Name, Line, Options, Body, Result) :-
-    option(fail, Options),                         % fail
-    !,
-    unit_module(Unit, Module),
-    call_time(reify(Module:Body, Result0), Time),
-    (   Result0 == true
-    ->  Result = failure(Unit, Name, Line, succeeded, Time)
-    ;   Result0 == false
-    ->  Result = success(Unit, Name, Line, true, Time)
-    ;   Result0 = throw(E)
-    ->  Result = failure(Unit, Name, Line, E, Time)
-    ).
-run_test_7(Unit, Name, Line, Options, Body, Result) :-
-    option(true(Cmp), Options),
+    option(true(Cmp), Options),			   % expected success
     !,
     unit_module(Unit, Module),
     call_time(reify(call_det(Module:Body, Det), Result0), Time),
@@ -1061,7 +1085,19 @@ run_test_7(Unit, Name, Line, Options, Body, Result) :-
     ->  Result = failure(Unit, Name, Line, E2, Time)
     ).
 run_test_7(Unit, Name, Line, Options, Body, Result) :-
-    option(throws(Expect), Options),
+    option(fail, Options),                         % expected failure
+    !,
+    unit_module(Unit, Module),
+    call_time(reify(Module:Body, Result0), Time),
+    (   Result0 == true
+    ->  Result = failure(Unit, Name, Line, succeeded, Time)
+    ;   Result0 == false
+    ->  Result = success(Unit, Name, Line, true, Time)
+    ;   Result0 = throw(E)
+    ->  Result = failure(Unit, Name, Line, E, Time)
+    ).
+run_test_7(Unit, Name, Line, Options, Body, Result) :-
+    option(throws(Expect), Options),		   % Expected error
     !,
     unit_module(Unit, Module),
     call_time(reify(Module:Body, Result0), Time),
@@ -1075,30 +1111,33 @@ run_test_7(Unit, Name, Line, Options, Body, Result) :-
         ;   Result = failure(Unit, Name, Line, wrong_error(Expect, E), Time)
         )
     ).
+run_test_7(Unit, Name, Line, Options, Body, Result) :-
+    option(all(Answer), Options),                  % all(Bindings)
+    !,
+    nondet_test(all(Answer), Unit, Name, Line, Options, Body, Result).
+run_test_7(Unit, Name, Line, Options, Body, Result) :-
+    option(set(Answer), Options),                  % set(Bindings)
+    !,
+    nondet_test(set(Answer), Unit, Name, Line, Options, Body, Result).
 
 
 %!  non_det_test(+Expected, +Unit, +Name, +Line, +Options, +Body, -Result)
 %
 %   Run tests on non-deterministic predicates.
 
-nondet_test(Expected, Unit, Name, Line, Options, Body, Result) :-
+nondet_test(Expected, Unit, Name, Line, _Options, Body, Result) :-
     unit_module(Unit, Module),
     result_vars(Expected, Vars),
-    (   setup(Module, test(Unit,Name,Line), Options)
-    ->  (   call_time(reify(findall(Vars, Module:Body, Bindings), Result0), Time)
-	->  (   Result0 == true
-	    ->  (   nondet_compare(Expected, Bindings, Unit, Name, Line)
-		->  Result = success(Unit, Name, Line, true, Time)
-		;   Result = failure(Unit, Name, Line, wrong_answer(Expected, Bindings), Time)
-		)
-	    ;   Result0 = throw(E)
-	    ->  Result = failure(Unit, Name, Line, E, Time)
-	    ),
-	    cleanup(Module, Options)
-	)
-    ;   Result = setup_failed(Unit, Name, Line)
+    (   call_time(reify(findall(Vars, Module:Body, Bindings), Result0), Time)
+    ->  (   Result0 == true
+        ->  (   nondet_compare(Expected, Bindings, Unit, Name, Line)
+            ->  Result = success(Unit, Name, Line, true, Time)
+            ;   Result = failure(Unit, Name, Line, wrong_answer(Expected, Bindings), Time)
+            )
+        ;   Result0 = throw(E)
+        ->  Result = failure(Unit, Name, Line, E, Time)
+        )
     ).
-
 
 %!  result_vars(+Expected, -Vars) is det.
 %
@@ -1239,9 +1278,9 @@ success(Unit, Name, Line, Det, Time, Options) :-
     (   (   Det == true
 	;   memberchk(nondet, Options)
 	)
-    ->  progress(Unit, Name, nondet, Time),
+    ->  progress(Unit, Name, fixme(passed), Time),
 	Ok = passed
-    ;   progress(Unit, Name, fixme, Time),
+    ;   progress(Unit, Name, fixme(nondet), Time),
 	Ok = nondet
     ),
     flush_output(user_error),
@@ -1267,10 +1306,11 @@ success(Unit, Name, Line, Det, Time, Options) :-
 failure(Unit, Name, Line, _, Time, Options) :-
     memberchk(fixme(Reason), Options),
     !,
-    progress(Unit, Name, failed, Time),
+    progress(Unit, Name, fixme(failed), Time),
     assert(fixme(Unit, Name, Line, Reason, failed)).
 failure(Unit, Name, Line, E, Time, Options) :-
     report_failure(Unit, Name, Line, E, Time, Options),
+    progress(Unit, Name, failed, Time),
     assert_cyclic(failed(Unit, Name, Line, E, Time)).
 
 %!  assert_cyclic(+Term) is det.
@@ -1548,7 +1588,9 @@ info(Term) :-
     print_message(Level, Term).
 
 progress(Unit, Name, Result, Time) :-
-    print_message(information, plunit(progress(Unit, Name, Result, Time))).
+    flag(plunit_test, N, N+1),
+    test_count(Total),
+    print_message(information, plunit(progress(Unit, Name, Result, N/Total, Time))).
 
 message_level(Level) :-
     current_test_flag(test_options, Options),
@@ -1587,7 +1629,7 @@ message(error(plunit(incompatible_options, Tests), _)) -->
 
 					% Unit start/end
 :- if(swi).
-message(plunit(progress(_Unit, _Name, Result, _Time))) -->
+message(plunit(progress(_Unit, _Name, Result, _N_T, _Time))) -->
     [ at_same_line ], result(Result), [flush].
 message(plunit(begin(Unit))) -->
     [ 'PL-Unit: ~w '-[Unit], flush ].
@@ -1728,11 +1770,12 @@ unqualify(M:Goal, _, Goal) :-
     !.
 unqualify(Goal, _, Goal).
 
-result(passed)    --> ['.'-[]].
-result(nondet)    --> ['+'-[]].
-result(fixme)     --> ['!'-[]].
-result(failed)    --> ['-'-[]].
-result(assertion) --> ['A'-[]].
+result(passed)        --> ['.'-[]].
+result(nondet)        --> ['+'-[]].
+result(fixme(passed)) --> ['*'-[]].
+result(fixme(failed)) --> ['!'-[]].
+result(failed)        --> ['-'-[]].
+result(assertion)     --> ['A'-[]].
 
 :- endif.
 					% Setup/condition errors
