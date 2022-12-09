@@ -1787,9 +1787,9 @@ message(plunit(error(Where, Context, Exception))) -->
 					% STO messages
 message(plunit(sto(Unit, Name, Line))) -->
     { unit_file(Unit, File) },
-       locationprefix(File:Line),
-       test_name(Name),
-       [' is subject to occurs check (STO): '-[] ].
+    locationprefix(File:Line),
+    test_name(Name),
+    [' is subject to occurs check (STO): '-[] ].
 message(plunit(sto(Type, Result))) -->
     sto_type(Type),
     sto_result(Result).
@@ -1827,7 +1827,7 @@ sto_type(finite_trees) -->
 sto_result(success(_Unit, _Name, _Line, Det, Time)) -->
     det(Det),
     [ ' success in ~3f seconds'-[Time.cpu] ].
-sto_result(failure(_Unit, _Name, _Line, How)) -->
+sto_result(failure(_Unit, _Name, _Line, How, _Time)) -->
     failure(How).
 
 det(true) -->
