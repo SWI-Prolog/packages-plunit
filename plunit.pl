@@ -605,35 +605,38 @@ capture_output(Goal, Output, Options) :-
 		 *        RUNNING TOPLEVEL      *
 		 *******************************/
 
-:- thread_local
+:- dynamic
     test_count/1,                   % Count
     passed/5,                       % Unit, Test, Line, Det, Time
     failed/5,                       % Unit, Test, Line, Reason, Time
     failed_assertion/7,             % Unit, Test, Line, ALoc, STO, Reason, Goal
     blocked/4,                      % Unit, Test, Line, Reason
     sto/4,                          % Unit, Test, Line, Results
-    fixme/5.                        % Unit, Test, Line, Reason, Status
-
-:- dynamic
+    fixme/5,                        % Unit, Test, Line, Reason, Status
     running/5,                      % Unit, Test, Line, STO, Thread
     forall_progress/4.              % Unit, Test, N, Failed
 
 %!  run_tests is semidet.
 %!  run_tests(+TestSet) is semidet.
 %
-%   Run  tests  and  report  about    the   results.  The  predicate
-%   run_tests/0 runs all known  tests  that   are  not  blocked. The
-%   predicate run_tests/1 takes a  specification   of  tests to run.
-%   This  is  either  a  single   specification    or   a   list  of
-%   specifications. Each single specification is  either the name of
-%   a test-unit or a term <test-unit>:<test>, denoting a single test
-%   within a unit.
+%   Run tests and report about the   results.  The predicate run_tests/0
+%   runs all known tests that are not blocked. The predicate run_tests/1
+%   takes a specification of tests  to  run.   This  is  either a single
+%   specification or a list of specifications. Each single specification
+%   is either the name of  a   test-unit  or  a term <test-unit>:<test>,
+%   denoting a single test within a unit.
+%
+%   The predicate run_tests/1 is synchronized. Concurrent testing may be
+%   achieved using the relevant options.  See set_test_options/1.
 
 run_tests :-
     findall(Unit, current_test_unit(Unit,_), Units),
     run_tests(Units).
 
 run_tests(Set) :-
+    with_mutex(plunit, run_tests_sync(Set)).
+
+run_tests_sync(Set) :-
     cleanup,
     count_tests(Set, Count),
     asserta(test_count(Count)),
@@ -742,7 +745,6 @@ matching_test(Name, Set) :-
     memberchk(Name, Set).
 
 cleanup :-
-    thread_self(Me),
     set_flag(plunit_test, 1),
     retractall(test_count(_)),
     retractall(passed(_, _, _, _, _)),
@@ -751,7 +753,8 @@ cleanup :-
     retractall(blocked(_, _, _, _)),
     retractall(sto(_, _, _, _)),
     retractall(fixme(_, _, _, _, _)),
-    retractall(running(_,_,_,_,Me)).
+    retractall(running(_,_,_,_,_)),
+    retractall(forall_progress(_,_,_,_)).
 
 cleanup_after_test :-
     current_test_flag(test_options, Options),
