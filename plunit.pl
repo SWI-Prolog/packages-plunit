@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2006-2022, University of Amsterdam
+    Copyright (c)  2006-2023, University of Amsterdam
 			      VU University Amsterdam
 			      CWI, Amsterdam
 			      SWI-Prolog Solutions b.v.
@@ -1451,7 +1451,8 @@ report :-
     ->  info(plunit(no_tests))
     ;   Failed+FailedAssertion+Blocked+STO =:= 0
     ->  report_fixme,
-	info(plunit(all_passed(Passed)))
+        test_count(Total),
+	info(plunit(all_passed(Total, Passed)))
     ;   report_blocked,
 	report_fixme,
 	report_failed_assertions,
@@ -1726,12 +1727,16 @@ message(plunit(blocked(Pos, Name, Reason))) -->
 message(plunit(no_tests)) -->
     !,
     [ 'No tests to run' ].
-message(plunit(all_passed(1))) -->
+message(plunit(all_passed(1, 1))) -->
     !,
     [ 'test passed' ].
-message(plunit(all_passed(Count))) -->
+message(plunit(all_passed(Total, Total))) -->
     !,
-    [ 'All ~D tests passed'-[Count] ].
+    [ 'All ~D tests passed'-[Total] ].
+message(plunit(all_passed(Total, Count))) -->
+    !,
+    { SubTests is Count-Total },
+    [ 'All ~D (+~D sub-tests) tests passed'-[Total, SubTests] ].
 message(plunit(passed(Count))) -->
     !,
     [ '~D tests passed'-[Count] ].
