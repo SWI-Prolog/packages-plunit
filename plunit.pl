@@ -615,7 +615,8 @@ capture_output(Goal, Output, Options) :-
     fixme/5.                        % Unit, Test, Line, Reason, Status
 
 :- dynamic
-    running/5.                      % Unit, Test, Line, STO, Thread
+    running/5,                      % Unit, Test, Line, STO, Thread
+    forall_progress/4.              % Unit, Test, N, Failed
 
 %!  run_tests is semidet.
 %!  run_tests(+TestSet) is semidet.
@@ -902,8 +903,11 @@ run_test(Unit, Name, Line, Options, Body) :-
     !,
     unit_module(Unit, Module),
     term_variables(Generator, Vars),
-    forall(Module:Generator,
-	   run_test_once(Unit, @(Name,Vars), Line, Options, Body)).
+    get_flag(plunit_test, N),
+    call_time(forall(Module:Generator,                      % may become concurrent
+                     run_test_once(Unit, @(Name,Vars,N), Line, Options, Body)),
+              Time),
+    progress(Unit, Name, forall(end, N), Time).
 run_test(Unit, Name, Line, Options, Body) :-
     run_test_once(Unit, Name, Line, Options, Body).
 
@@ -1580,17 +1584,57 @@ load_test_files(_Options) :-
 
 %!  info(+Term)
 %
-%   Runs print_message(Level, Term), where Level  is one of =silent=
-%   or =informational= (default).
+%   Runs print_message(Level, Term), where Level is   one of `silent` or
+%   `informational` (default).
 
 info(Term) :-
     message_level(Level),
     print_message(Level, Term).
 
-progress(Unit, Name, Result, Time) :-
+%!  progress(+Unit, +Name, +Result, +Time) is det.
+%
+%   Test Unit:Name completed in Time. Result is the result and is one of
+%
+%     - passed
+%     - failed
+%     - assertion
+%     - nondet
+%     - fixme(passed)
+%     - fixme(nondet)
+%     - fixme(failed)
+%     - forall(end)
+%       Pseudo result for completion of a forall(Gen,Test) set.  Mapped
+%       to forall(Total, Failed)
+
+progress(Unit, Name, forall(end, N), Time) =>
+    (   retract(forall_progress(Unit, Name, FTotal, FFailed))
+    ->  true
+    ;   FTotal = 0, FFailed = 0
+    ),
+    flag(plunit_test, T, T+1),
+    test_count(Total),
+    print_message(information, plunit(progress(Unit, Name, forall(FTotal,FFailed), N/Total, Time))).
+progress(Unit,  @(Name,Vars,N), Result, Time) =>
+    with_mutex(plunit,
+               incr_forall_result(Unit, Name, Result, I)),
+    test_count(Total),
+    print_message(information, plunit(progress(Unit, @(Name,Vars), Result, (N-I)/Total, Time))).
+progress(Unit, Name, Result, Time) =>
     flag(plunit_test, N, N+1),
     test_count(Total),
     print_message(information, plunit(progress(Unit, Name, Result, N/Total, Time))).
+
+incr_forall_result(Unit, Name, Result, N) :-
+    (   retract(forall_progress(Unit, Name, N0, Failed0))
+    ->  N is N0+1
+    ;   N = 1,
+        Failed0 = 0
+    ),
+    update_failed(Result, Failed0, Failed),
+    asserta(forall_progress(Unit, Name, N, Failed)).
+
+update_failed(passed, Failed0, Failed) => Failed = Failed0.
+update_failed(_,      Failed0, Failed) => Failed is Failed0+1.
 
 message_level(Level) :-
     current_test_flag(test_options, Options),
@@ -1776,6 +1820,7 @@ result(fixme(passed)) --> ['*'-[]].
 result(fixme(failed)) --> ['!'-[]].
 result(failed)        --> ['-'-[]].
 result(assertion)     --> ['A'-[]].
+result(forall(_,_))   --> [].
 
 :- endif.
 					% Setup/condition errors
