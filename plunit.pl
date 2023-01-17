@@ -239,6 +239,11 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
 %    - concurrent(+Bool)
 %      If `true` (default `false`), run all tests in a unit
 %      concurrently.
+%
+%    - timeout(+Seconds)
+%      Set timeout for each individual test.  This acts as a
+%      default that may be overuled at the level of units or
+%      individual tests.
 
 set_test_options(Options) :-
     valid_options(Options, global_test_option),
@@ -258,6 +263,8 @@ global_test_option(cleanup(Bool)) :-
     must_be(boolean, Bool).
 global_test_option(concurrent(Bool)) :-
     must_be(boolean, Bool).
+global_test_option(timeout(Number)) :-
+    must_be(number, Number).
 
 
 %!  loading_tests
@@ -554,6 +561,8 @@ test_option(nondet).
 test_option(fixme(_)).
 test_option(forall(X)) :-
     must_be(callable, X).
+test_option(timeout(Seconds)) :-
+    must_be(number, Seconds).
 
 %!  test_option(+Option) is semidet.
 %
@@ -572,16 +581,35 @@ test_set_option(sto(V)) :-
     nonvar(V), member(V, [finite_trees, rational_trees]).
 test_set_option(concurrent(V)) :-
     must_be(boolean, V).
+test_set_option(timeout(Seconds)) :-
+    must_be(number, Seconds).
 
 		 /*******************************
 		 *             UTIL		*
 		 *******************************/
 
 :- meta_predicate
+       reify_tmo(0, -, +),
        reify(0, -),
        capture_output(0,-,+).
 
+%!  reify_tmo(:Goal, -Result, +Options) is det.
+
+reify_tmo(Goal, Result, Options) :-
+    option(timeout(Time), Options),
+    !,
+    reify(call_with_time_limit(Time, Goal), Result0),
+    (   Result0 = throw(time_limit_exceeded)
+    ->  Result = throw(time_limit_exceeded(Time))
+    ;   Result = Result0
+    ).
+reify_tmo(Goal, Result, _Options) :-
+    reify(Goal, Result).
+
 %!  reify(:Goal, -Result) is det.
+%
+%   Call  Goal  and  unify  Result  with   one  of  `true`,  `false`  or
+%   `throw(E)`.
 
 reify(Goal, Result) :-
     (   catch(Goal, E, true)
@@ -609,6 +637,7 @@ capture_output(Goal, Output, Options) :-
     test_count/1,                   % Count
     passed/5,                       % Unit, Test, Line, Det, Time
     failed/5,                       % Unit, Test, Line, Reason, Time
+    timeout/5,                      % Unit, Test, Line, Limit, Time
     failed_assertion/7,             % Unit, Test, Line, ALoc, STO, Reason, Goal
     blocked/4,                      % Unit, Test, Line, Reason
     sto/4,                          % Unit, Test, Line, Results
@@ -715,12 +744,12 @@ run_unit_2(Unit, Tests, Module, UnitOptions) :-
     !,
     concurrent_forall((Module:'unit test'(Name, Line, Options, Body),
 		       matching_test(Name, Tests)),
-		      run_test(Unit, Name, Line, Options, Body)).
+		      run_test(Unit, Name, Line, UnitOptions, Options, Body)).
 :- endif.
-run_unit_2(Unit, Tests, Module, _UnitOptions) :-
+run_unit_2(Unit, Tests, Module, UnitOptions) :-
     forall(( Module:'unit test'(Name, Line, Options, Body),
 	     matching_test(Name, Tests)),
-	   run_test(Unit, Name, Line, Options, Body)).
+	   run_test(Unit, Name, Line, UnitOptions, Options, Body)).
 
 
 unit_from_spec(Unit, Unit, _, Module, Options) :-
@@ -749,6 +778,7 @@ cleanup :-
     retractall(test_count(_)),
     retractall(passed(_, _, _, _, _)),
     retractall(failed(_, _, _, _, _)),
+    retractall(timeout(_, _, _, _, _)),
     retractall(failed_assertion(_, _, _, _, _, _, _)),
     retractall(blocked(_, _, _, _)),
     retractall(sto(_, _, _, _)),
@@ -897,22 +927,38 @@ cleanup_trap_assertions(_).
 		 *         RUNNING A TEST       *
 		 *******************************/
 
-%!  run_test(+Unit, +Name, +Line, +Options, +Body) is det.
+%!  run_test(+Unit, +Name, +Line, +UnitOptions, +Options, +Body) is det.
 %
 %   Run a single test.
 
-run_test(Unit, Name, Line, Options, Body) :-
+run_test(Unit, Name, Line, UnitOptions, Options, Body) :-
     option(forall(Generator), Options),
     !,
     unit_module(Unit, Module),
     term_variables(Generator, Vars),
     get_flag(plunit_test, N),
     call_time(forall(Module:Generator,                      % may become concurrent
-                     run_test_once(Unit, @(Name,Vars,N), Line, Options, Body)),
+                     run_test_once6(Unit, @(Name,Vars,N), Line,
+                                   UnitOptions, Options, Body)),
               Time),
     progress(Unit, Name, forall(end, N), Time).
-run_test(Unit, Name, Line, Options, Body) :-
-    run_test_once(Unit, Name, Line, Options, Body).
+run_test(Unit, Name, Line, UnitOptions, Options, Body) :-
+    run_test_once6(Unit, Name, Line, UnitOptions, Options, Body).
+
+run_test_once6(Unit, Name, Line, UnitOptions, Options, Body) :-
+    current_test_flag(test_options, GlobalOptions),
+    inherit_option(timeout, Options, [UnitOptions, GlobalOptions], Options1),
+    run_test_once(Unit, Name, Line, Options1, Body).
+
+inherit_option(Name, Options0, Chain, Options) :-
+    Term =.. [Name,_Value],
+    (   option(Term, Options0)
+    ->  Options = Options0
+    ;   member(Opts, Chain),
+        option(Term, Opts)
+    ->  Options = [Term|Options0]
+    ;   Options = Options0
+    ).
 
 run_test_once(Unit, Name, Line, Options, Body) :-
     current_test_flag(test_options, GlobalOptions),
@@ -1034,6 +1080,7 @@ print_test_output(_, _, _).
 %       How is one of:
 %       - succeeded
 %       - Exception
+%       - time_limit_exceeded(Limit)
 %       - cmp_error(Cmp, E)
 %       - wrong_answer(Cmp)
 %       - failed
@@ -1077,7 +1124,7 @@ run_test_7(Unit, Name, Line, Options, Body, Result) :-
     option(true(Cmp), Options),			   % expected success
     !,
     unit_module(Unit, Module),
-    call_time(reify(call_det(Module:Body, Det), Result0), Time),
+    call_time(reify_tmo(call_det(Module:Body, Det), Result0, Options), Time),
     (   Result0 == true
     ->  (   catch(Module:Cmp, E, true)
         ->  (  var(E)
@@ -1095,7 +1142,7 @@ run_test_7(Unit, Name, Line, Options, Body, Result) :-
     option(fail, Options),                         % expected failure
     !,
     unit_module(Unit, Module),
-    call_time(reify(Module:Body, Result0), Time),
+    call_time(reify_tmo(Module:Body, Result0, Options), Time),
     (   Result0 == true
     ->  Result = failure(Unit, Name, Line, succeeded, Time)
     ;   Result0 == false
@@ -1107,7 +1154,7 @@ run_test_7(Unit, Name, Line, Options, Body, Result) :-
     option(throws(Expect), Options),		   % Expected error
     !,
     unit_module(Unit, Module),
-    call_time(reify(Module:Body, Result0), Time),
+    call_time(reify_tmo(Module:Body, Result0, Options), Time),
     (   Result0 == true
     ->  Result = failure(Unit, Name, Line, no_exception, Time)
     ;   Result0 == false
@@ -1132,10 +1179,11 @@ run_test_7(Unit, Name, Line, Options, Body, Result) :-
 %
 %   Run tests on non-deterministic predicates.
 
-nondet_test(Expected, Unit, Name, Line, _Options, Body, Result) :-
+nondet_test(Expected, Unit, Name, Line, Options, Body, Result) :-
     unit_module(Unit, Module),
     result_vars(Expected, Vars),
-    (   call_time(reify(findall(Vars, Module:Body, Bindings), Result0), Time)
+    (   call_time(reify_tmo(findall(Vars, Module:Body, Bindings),
+                            Result0, Options), Time)
     ->  (   Result0 == true
         ->  (   nondet_compare(Expected, Bindings, Unit, Name, Line)
             ->  Result = success(Unit, Name, Line, true, Time)
@@ -1310,12 +1358,15 @@ success(Unit, Name, Line, Det, Time, Options) :-
 %
 %   Test failed.  Report the error.
 
-failure(Unit, Name, Line, _, Time, Options) :-
-    memberchk(fixme(Reason), Options),
-    !,
+failure(Unit, Name, Line, _, Time, Options),
+  memberchk(fixme(Reason), Options) =>
     progress(Unit, Name, fixme(failed), Time),
     assert(fixme(Unit, Name, Line, Reason, failed)).
-failure(Unit, Name, Line, E, Time, Options) :-
+failure(Unit, Name, Line, time_limit_exceeded(Limit), Time, Options) =>
+    report_failure(Unit, Name, Line, timeout(Limit), Time, Options),
+    progress(Unit, Name, timeout(Limit), Time),
+    assert_cyclic(timeout(Unit, Name, Line, Limit, Time)).
+failure(Unit, Name, Line, E, Time, Options) =>
     report_failure(Unit, Name, Line, E, Time, Options),
     progress(Unit, Name, failed, Time),
     assert_cyclic(failed(Unit, Name, Line, E, Time)).
@@ -1416,6 +1467,7 @@ count(Goal, Count) :-
 
 test_summary(Unit, Summary) :-
     count(failed(Unit, _0Test, _0Line, _Reason, _0Time), Failed),
+    count(timeout(Unit, _0Test, _0Line, _Limit, _0Time), Timeout),
     count(failed_assertion(Unit, _0Test, _0Line,
 			   _ALoc, _STO, _0Reason, _Goal), FailedAssertion),
     count(sto(Unit, _0Test, _0Line, _Results), STO),
@@ -1424,6 +1476,7 @@ test_summary(Unit, Summary) :-
     Summary = plunit{passed:Passed,
 		     failed:Failed,
 		     failed_assertions:FailedAssertion,
+		     timeout:Timeout,
 		     blocked:Blocked,
 		     sto:STO}.
 
@@ -1444,20 +1497,22 @@ report :-
     _{ passed:Passed,
        failed:Failed,
        failed_assertions:FailedAssertion,
+       timeout:Timeout,
        blocked:Blocked,
        sto:STO
      } :< Summary,
-    (   Passed+Failed+FailedAssertion+Blocked+STO =:= 0
+    (   Passed+Failed+FailedAssertion+Timeout+Blocked+STO =:= 0
     ->  info(plunit(no_tests))
-    ;   Failed+FailedAssertion+Blocked+STO =:= 0
+    ;   Failed+FailedAssertion+Timeout+Blocked+STO =:= 0
     ->  report_fixme,
         test_count(Total),
 	info(plunit(all_passed(Total, Passed)))
-    ;   report_blocked,
+    ;   report_blocked(Blocked),
 	report_fixme,
-	report_failed_assertions,
-	report_failed,
-	report_sto,
+	report_failed_assertions(FailedAssertion),
+	report_failed(Failed),
+	report_sto(STO),
+	report_timeout(Timeout),
 	info(plunit(passed(Passed)))
     ).
 
@@ -1469,30 +1524,28 @@ number_of_clauses(F/A,N) :-
     ;   N = 0
     ).
 
-report_blocked :-
-    number_of_clauses(blocked/4,N),
-    N > 0,
-    !,
-    info(plunit(blocked(N))),
+report_blocked(0) =>
+    true.
+report_blocked(Blocked) =>
+    info(plunit(blocked(Blocked))),
     (   blocked(Unit, Name, Line, Reason),
 	unit_file(Unit, File),
 	print_message(informational,
 		      plunit(blocked(File:Line, Name, Reason))),
 	fail ; true
     ).
-report_blocked.
 
-report_failed :-
-    number_of_clauses(failed/5, N),
-    info(plunit(failed(N))).
+report_failed(Failed) :-
+    info(plunit(failed(Failed))).
 
-report_failed_assertions :-
-    number_of_clauses(failed_assertion/7, N),
-    info(plunit(failed_assertions(N))).
+report_failed_assertions(FailedAssertion) :-
+    info(plunit(failed_assertions(FailedAssertion))).
 
-report_sto :-
-    number_of_clauses(sto/4, N),
-    info(plunit(sto(N))).
+report_timeout(Count) :-
+    info(plunit(timeout(Count))).
+
+report_sto(STO) :-
+    info(plunit(sto(STO))).
 
 report_fixme :-
     report_fixme(_,_,_).
@@ -1510,10 +1563,11 @@ fixme(How, Tuples, Count) :-
     length(Tuples, Count).
 
 
-report_failure(Unit, Name, _, assertion, Time, _) :-
-    !,
+report_failure(Unit, Name, _, assertion, Time, _) =>
     progress(Unit, Name, assertion, Time).
-report_failure(Unit, Name, Line, Error, _Time, _Options) :-
+report_failure(Unit, Name, Line, timeout(Limit), _Time, _Options) =>
+    print_message(warning, plunit(timeout(Unit, Name, Line, Limit))).
+report_failure(Unit, Name, Line, Error, _Time, _Options) =>
     print_message(error, plunit(failed(Unit, Name, Line, Error))).
 
 
@@ -1761,6 +1815,11 @@ message(plunit(sto(0))) -->
     [].
 message(plunit(sto(N))) -->
     [ '~D test results depend on unification mode'-[N] ].
+message(plunit(timeout(0))) -->
+    !,
+    [].
+message(plunit(timeout(N))) -->
+    [ '~D tests timed out'-[N] ].
 message(plunit(fixme(0,0,0))) -->
     [].
 message(plunit(fixme(Failed,0,0))) -->
@@ -1778,6 +1837,12 @@ message(plunit(failed(Unit, Name, Line, Failure))) -->
     test_name(Name),
     [': '-[] ],
     failure(Failure).
+message(plunit(timeout(Unit, Name, Line, Limit))) -->
+    { unit_file(Unit, File) },
+    locationprefix(File:Line),
+    test_name(Name),
+    [': '-[] ],
+    timeout(Limit).
 :- if(swi).
 message(plunit(failed_assertion(Unit, Name, Line, AssertLoc,
 				_STO, Reason, Goal))) -->
@@ -1827,6 +1892,7 @@ result(nondet)        --> ['+'-[]].
 result(fixme(passed)) --> ['*'-[]].
 result(fixme(failed)) --> ['!'-[]].
 result(failed)        --> ['-'-[]].
+result(timeout(_Lim)) --> ['T'-[]].
 result(assertion)     --> ['A'-[]].
 result(forall(_,_))   --> [].
 
@@ -1978,6 +2044,9 @@ failure(Error) -->
 :- endif.
 failure(Why) -->
     [ '~p'-[Why] ].
+
+timeout(Limit) -->
+    [ 'Timeout exceeeded (~2f sec)'-[Limit] ].
 
 fixme_message([]) --> [].
 fixme_message([fixme(Unit, _Name, Line, Reason, How)|T]) -->
