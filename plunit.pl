@@ -678,6 +678,23 @@ run_tests_sync(Units) :-
 	run_units_and_check_errors(Units),
 	report_and_cleanup(Ref)).
 
+%!  report_and_cleanup(+Ref)
+%
+%   Undo changes to the environment   (trapping  assertions), report the
+%   results and cleanup.
+
+report_and_cleanup(Ref) :-
+    cleanup_trap_assertions(Ref),
+    report,
+    cleanup_after_test.
+
+%!  run_units_and_check_errors(+Units) is semidet.
+%
+%   Run all test units and succeed if all tests passed.
+
+run_units_and_check_errors(Units) :-
+    maplist(run_unit, Units),
+    all_tests_passed(_).
 
 %!  runnable_tests(+Spec, -Plan) is det.
 %
@@ -739,20 +756,6 @@ count_tests(Units, Count) :-
 count_tests_in_unit(_Unit:Tests, Count0, Count) :-
     length(Tests, N),
     Count is Count0+N.
-
-%!  report_and_cleanup(+Ref)
-%
-%   Undo changes to the environment   (trapping  assertions), report the
-%   results and cleanup.
-
-report_and_cleanup(Ref) :-
-    cleanup_trap_assertions(Ref),
-    report,
-    cleanup_after_test.
-
-run_units_and_check_errors(Units) :-
-    maplist(run_unit, Units),
-    all_tests_passed(_).
 
 %!  run_unit(+Unit) is det.
 %
@@ -1483,6 +1486,11 @@ test_summary(Unit, Summary) :-
 		     timeout:Timeout,
 		     blocked:Blocked,
 		     sto:STO}.
+
+%!  all_tests_passed(?Unit) is semidet.
+%
+%   True if Unit passed. If Unit is unbound   this  is true if all units
+%   passed.
 
 all_tests_passed(Unit) :-
     test_summary(Unit, Summary),
