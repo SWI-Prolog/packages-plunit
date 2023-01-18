@@ -666,7 +666,8 @@ run_tests :-
 
 run_tests(Set) :-
     flatten([Set], List),
-    with_mutex(plunit, run_tests_sync(List)).
+    maplist(runnable_tests, List, Units),
+    with_mutex(plunit, run_tests_sync(Units)).
 
 run_tests_sync(Units) :-
     cleanup,
@@ -677,6 +678,55 @@ run_tests_sync(Units) :-
 	run_units_and_check_errors(Units),
 	report_and_cleanup(Ref)).
 
+
+%!  runnable_tests(+Spec, -Plan)
+%
+%   Change a Unit+Test spec  into  a   plain  `Unit:Tests`  lists, where
+%   blocked tests or tests whose condition fails are already removed.
+
+runnable_tests(Spec, Unit:RunnableTests) :-
+    unit_from_spec(Spec, Unit, Tests, Module, UnitOptions),
+    (   option(blocked(Reason), UnitOptions)
+    ->  info(plunit(blocked(unit(Unit, Reason)))),
+        RunnableTests = []
+    ;   \+ condition(Module, unit(Unit), UnitOptions)
+    ->  RunnableTests = []
+    ;   var(Tests)
+    ->  findall(Test, runnable_test(Unit, Test, Module), RunnableTests)
+    ;   flatten([Tests], TestList),
+        findall(Test,
+                ( member(Test, TestList),
+                  runnable_test(Unit,Test,Module)
+                ),
+                RunnableTests)
+    ).
+
+runnable_test(Unit, Test, Module) :-
+    current_test(Unit, Test, Line, _Body, TestOptions),
+    (   option(blocked(Reason), TestOptions)
+    ->  assert(blocked(Unit, Test, Line, Reason)),
+        fail
+    ;   condition(Module, test(Unit,Test,Line), TestOptions)
+    ).
+
+%!  count_tests(+Units, -Count) is det.
+%
+%   Count the number of tests to   run. A forall(Generator, Test) counts
+%   as a single test. During the execution,   the  concrete tests of the
+%   _forall_ are considered "sub tests".
+
+count_tests(Units, Count) :-
+    foldl(count_tests_in_unit, Units, 0, Count).
+
+count_tests_in_unit(_Unit:Tests, Count0, Count) :-
+    length(Tests, N),
+    Count is Count0+N.
+
+%!  report_and_cleanup(+Ref)
+%
+%   Undo changes to the environment   (trapping  assertions), report the
+%   results and cleanup.
+
 report_and_cleanup(Ref) :-
     cleanup_trap_assertions(Ref),
     report,
@@ -686,54 +736,20 @@ run_units_and_check_errors(Units) :-
     maplist(run_unit, Units),
     all_tests_passed(_).
 
-%!  run_unit(+Spec) is det.
+%!  run_unit(+Unit) is det.
 %
-%   Run a single test unit or a set of   tests from a unit if Spec is of
-%   the format `Spec:Test` or `Spec:[Test1, ...]`.
+%   Run a single test unit. Unit is a  term Unit:Tests, where Tests is a
+%   list of tests to run.
 
 run_unit(Spec) :-
     unit_from_spec(Spec, Unit, Tests, Module, UnitOptions),
-    (   option(blocked(Reason), UnitOptions)
-    ->  info(plunit(blocked(unit(Unit, Reason))))
-    ;   condition(Module, unit(Unit), UnitOptions)
-    ->  (   setup(Module, unit(Unit), UnitOptions)
-        ->  info(plunit(begin(Spec))),
-            call_time(run_unit_2(Unit, Tests, Module, UnitOptions), Time),
-            test_summary(Unit, Summary),
-            info(plunit(end(Spec, Summary.put(time, Time)))),
-            cleanup(Module, UnitOptions)
-        )
-    ;   true
+    (   setup(Module, unit(Unit), UnitOptions)
+    ->  info(plunit(begin(Spec))),
+        call_time(run_unit_2(Unit, Tests, Module, UnitOptions), Time),
+        test_summary(Unit, Summary),
+        info(plunit(end(Spec, Summary.put(time, Time)))),
+        cleanup(Module, UnitOptions)
     ).
-
-%!  count_tests(+Spec, -Count) is det.
-%
-%   Count the number of tests to   run. A forall(Generator, Test) counts
-%   as a single test. During the execution,   the  concrete tests of the
-%   _forall_ are considered "sub tests".
-
-count_tests(Units, Count) :-
-    foldl(count_tests_in_unit, Units, 0, Count).
-
-count_tests_in_unit(Spec, Count0, Count) :-
-    unit_from_spec(Spec, Unit, Tests, _Module, UnitOptions),
-    (   option(blocked(_Reason), UnitOptions)
-    ->  Count = Count0
-    ;   var(Tests)
-    ->  count(nonblocked_test(Unit,_), N),
-	Count is Count0+N
-    ;   atom(Tests),
-	current_test(Unit,Tests,_,_,_)
-    ->  Count is Count0+1
-    ;   is_list(Tests)
-    ->  count((member(T, Tests), nonblocked_test(Unit,T)), N),
-	Count is Count0+N
-    ;   Count = Count0
-    ).
-
-nonblocked_test(Unit, Test) :-
-    current_test(Unit, Test, _, _, TestOptions),
-    \+ option(blocked(_), TestOptions).
 
 
 :- if(current_prolog_flag(threads, true)).
@@ -1019,8 +1035,7 @@ test_caps(Type, Unit, Name, Line, Options, Body, Result, Key) :-
     run_test_6(Unit, Name, Line, Options, Body, Result),
     end_test(Unit, Name, Line, Type),
     result_to_key(Result, Key),
-    Key \== setup_failed,
-    Key \== condition_failed.
+    Key \== setup_failed.
 
 :- det(result_to_key/2).
 result_to_key(blocked(_, _, _, _), blocked).
@@ -1028,7 +1043,6 @@ result_to_key(failure(_, _, _, How0, _), failure(How1)) :-
     ( How0 = succeeded(_T) -> How1 = succeeded ; How0 = How1 ).
 result_to_key(success(_, _, _, Determinism, _), success(Determinism)).
 result_to_key(setup_failed(_,_,_), setup_failed).
-result_to_key(condition_failed(_,_,_), condition_failed).
 
 :- det(report_result/3).
 report_result(Result, Output, Options) :-
@@ -1046,7 +1060,6 @@ report_result(success(Unit, Name, Line, Determinism, Time), Options) :-
     !,
     success(Unit, Name, Line, Determinism, Time, Options).
 report_result(setup_failed(_Unit, _Name, _Line), _Options).
-report_result(condition_failed(_Unit, _Name, _Line), _Options).
 report_result(sto(Unit, Name, Line, ResultByType), Options) :-
     assert(sto(Unit, Name, Line, ResultByType)),
     print_message(error, plunit(sto(Unit, Name, Line))),
@@ -1075,7 +1088,6 @@ print_test_output(_, _, _).
 %   Result is one of:
 %
 %     - blocked(Unit, Name, Line, Reason)
-%     - condition_failed(Unit, Name, Line)
 %     - failure(Unit, Name, Line, How, Time)
 %       How is one of:
 %       - succeeded
@@ -1094,11 +1106,6 @@ run_test_6(Unit, Name, Line, Options, _Body,
 	   blocked(Unit, Name, Line, Reason)) :-
     option(blocked(Reason), Options),
     !.
-run_test_6(Unit, Name, Line, Options, _Body, Result) :-
-    unit_module(Unit, Module),
-    \+ condition(Module, test(Unit,Name,Line), Options),
-    !,
-    Result = condition_failed(Unit, Name, Line).
 run_test_6(Unit, Name, Line, Options, Body, Result) :-
     option(setup(_Setup), Options),
     !,
