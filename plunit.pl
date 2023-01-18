@@ -679,11 +679,14 @@ run_tests_sync(Units) :-
 	report_and_cleanup(Ref)).
 
 
-%!  runnable_tests(+Spec, -Plan)
+%!  runnable_tests(+Spec, -Plan) is det.
 %
 %   Change a Unit+Test spec  into  a   plain  `Unit:Tests`  lists, where
-%   blocked tests or tests whose condition fails are already removed.
+%   blocked tests or tests whose condition   fails  are already removed.
+%   Each test in `Tests` is a  term   `@(Test,Line)`,  which serves as a
+%   unique identifier of the test.
 
+:- det(runnable_tests/2).
 runnable_tests(Spec, Unit:RunnableTests) :-
     unit_from_spec(Spec, Unit, Tests, Module, UnitOptions),
     (   option(blocked(Reason), UnitOptions)
@@ -692,21 +695,36 @@ runnable_tests(Spec, Unit:RunnableTests) :-
     ;   \+ condition(Module, unit(Unit), UnitOptions)
     ->  RunnableTests = []
     ;   var(Tests)
-    ->  findall(Test, runnable_test(Unit, Test, Module), RunnableTests)
+    ->  findall(TestID,
+                runnable_test(Unit, _Test, Module, TestID),
+                RunnableTests)
     ;   flatten([Tests], TestList),
-        findall(Test,
+        findall(TestID,
                 ( member(Test, TestList),
-                  runnable_test(Unit,Test,Module)
+                  runnable_test(Unit,Test,Module, TestID)
                 ),
                 RunnableTests)
     ).
 
-runnable_test(Unit, Test, Module) :-
+runnable_test(Unit, Test, Module, @(Test,Line)) :-
     current_test(Unit, Test, Line, _Body, TestOptions),
     (   option(blocked(Reason), TestOptions)
     ->  assert(blocked(Unit, Test, Line, Reason)),
         fail
     ;   condition(Module, test(Unit,Test,Line), TestOptions)
+    ).
+
+unit_from_spec(Unit0:Tests, Unit, Tests, Module, Options), atom(Unit0) =>
+    Unit = Unit0,
+    (   current_unit(Unit, Module, _Supers, Options)
+    ->  true
+    ;   throw_error(existence_error(unit_test, Unit), _)
+    ).
+unit_from_spec(Unit0, Unit, _, Module, Options), atom(Unit0) =>
+    Unit = Unit0,
+    (   current_unit(Unit, Module, _Supers, Options)
+    ->  true
+    ;   throw_error(existence_error(unit_test, Unit), _)
     ).
 
 %!  count_tests(+Units, -Count) is det.
@@ -741,11 +759,12 @@ run_units_and_check_errors(Units) :-
 %   Run a single test unit. Unit is a  term Unit:Tests, where Tests is a
 %   list of tests to run.
 
-run_unit(Spec) :-
-    unit_from_spec(Spec, Unit, Tests, Module, UnitOptions),
+run_unit(Unit:Tests) =>
+    unit_module(Unit, Module),
+    unit_options(Unit, UnitOptions),
     (   setup(Module, unit(Unit), UnitOptions)
     ->  info(plunit(begin(Spec))),
-        call_time(run_unit_2(Unit, Tests, Module, UnitOptions), Time),
+        call_time(run_unit_2(Unit, Tests), Time),
         test_summary(Unit, Summary),
         info(plunit(end(Spec, Summary.put(time, Time)))),
         cleanup(Module, UnitOptions)
@@ -753,41 +772,23 @@ run_unit(Spec) :-
 
 
 :- if(current_prolog_flag(threads, true)).
-run_unit_2(Unit, Tests, Module, UnitOptions) :-
+run_unit_2(Unit, Tests) :-
+    unit_options(Unit, UnitOptions),
     option(concurrent(true), UnitOptions, false),
     current_test_flag(test_options, GlobalOptions),
     option(concurrent(true), GlobalOptions),
     !,
-    concurrent_forall((Module:'unit test'(Name, Line, Options, Body),
-		       matching_test(Name, Tests)),
-		      run_test(Unit, Name, Line, UnitOptions, Options, Body)).
+    concurrent_forall(member(Test, Tests),
+                      run_test(Unit, Test)).
 :- endif.
-run_unit_2(Unit, Tests, Module, UnitOptions) :-
-    forall(( Module:'unit test'(Name, Line, Options, Body),
-	     matching_test(Name, Tests)),
-	   run_test(Unit, Name, Line, UnitOptions, Options, Body)).
+run_unit_2(Unit, Tests) :-
+    forall(member(Test, Tests),
+	   run_test(Unit, Test)).
 
 
-unit_from_spec(Unit, Unit, _, Module, Options) :-
-    atom(Unit),
-    !,
-    (   current_unit(Unit, Module, _Supers, Options)
-    ->  true
-    ;   throw_error(existence_error(unit_test, Unit), _)
-    ).
-unit_from_spec(Unit:Tests, Unit, Tests, Module, Options) :-
-    atom(Unit),
-    !,
-    (   current_unit(Unit, Module, _Supers, Options)
-    ->  true
-    ;   throw_error(existence_error(unit_test, Unit), _)
-    ).
+unit_options(Unit, Options) :-
+    current_unit(Unit, _Module, _Supers, Options).
 
-
-matching_test(X, X) :- !.
-matching_test(Name, Set) :-
-    is_list(Set),
-    memberchk(Name, Set).
 
 cleanup :-
     set_flag(plunit_test, 1),
@@ -943,9 +944,15 @@ cleanup_trap_assertions(_).
 		 *         RUNNING A TEST       *
 		 *******************************/
 
-%!  run_test(+Unit, +Name, +Line, +UnitOptions, +Options, +Body) is det.
+%!  run_test(+Unit, +Test) is det.
 %
 %   Run a single test.
+
+run_test(Unit, @(Test,Line)) :-
+    unit_module(Unit, Module),
+    Module:'unit test'(Test, Line, TestOptions, Body),
+    unit_options(Unit, UnitOptions),
+    run_test(Unit, Test, Line, UnitOptions, TestOptions, Body).
 
 run_test(Unit, Name, Line, UnitOptions, Options, Body) :-
     option(forall(Generator), Options),
