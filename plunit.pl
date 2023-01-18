@@ -56,19 +56,21 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 */
 
 :- autoload(library(statistics), [call_time/2]).
-:- autoload(library(apply), [maplist/3,include/3]).
-:- autoload(library(lists), [member/2,append/2]).
-:- autoload(library(option), [option/3,option/2]).
+:- autoload(library(apply), [maplist/3, include/3, maplist/2, foldl/4]).
+:- autoload(library(lists), [member/2, append/2, flatten/2]).
+:- autoload(library(option), [option/3, option/2]).
 :- autoload(library(ordsets), [ord_intersection/3]).
-:- autoload(library(pairs), [group_pairs_by_key/2,pairs_values/2]).
+:- autoload(library(pairs), [group_pairs_by_key/2, pairs_values/2]).
 :- autoload(library(error), [must_be/2]).
 :- autoload(library(thread), [concurrent_forall/2]).
 :- autoload(library(aggregate), [aggregate_all/3]).
 :- autoload(library(streams), [with_output_to/3]).
 :- autoload(library(ansi_term), [ansi_format/3]).
+:- autoload(library(time), [call_with_time_limit/2]).
 
-:- meta_predicate valid_options(+, 1).
-
+:- meta_predicate
+    valid_options(+, 1),
+    count(0, -).
 
 		 /*******************************
 		 *    CONDITIONAL COMPILATION   *
@@ -663,15 +665,16 @@ run_tests :-
     run_tests(Units).
 
 run_tests(Set) :-
-    with_mutex(plunit, run_tests_sync(Set)).
+    flatten([Set], List),
+    with_mutex(plunit, run_tests_sync(List)).
 
-run_tests_sync(Set) :-
+run_tests_sync(Units) :-
     cleanup,
-    count_tests(Set, Count),
+    count_tests(Units, Count),
     asserta(test_count(Count)),
     setup_call_cleanup(
 	setup_trap_assertions(Ref),
-	run_unit_and_check_errors(Set),
+	run_units_and_check_errors(Units),
 	report_and_cleanup(Ref)).
 
 report_and_cleanup(Ref) :-
@@ -679,15 +682,15 @@ report_and_cleanup(Ref) :-
     report,
     cleanup_after_test.
 
-run_unit_and_check_errors(Set) :-
-    run_unit(Set),
+run_units_and_check_errors(Units) :-
+    maplist(run_unit, Units),
     all_tests_passed(_).
 
-run_unit([]) :- !.
-run_unit([H|T]) :-
-    !,
-    run_unit(H),
-    run_unit(T).
+%!  run_unit(+Spec) is det.
+%
+%   Run a single test unit or a set of   tests from a unit if Spec is of
+%   the format `Spec:Test` or `Spec:[Test1, ...]`.
+
 run_unit(Spec) :-
     unit_from_spec(Spec, Unit, Tests, Module, UnitOptions),
     (   option(blocked(Reason), UnitOptions)
@@ -705,35 +708,32 @@ run_unit(Spec) :-
 
 %!  count_tests(+Spec, -Count) is det.
 %
-%   Count the number of tests to run.
+%   Count the number of tests to   run. A forall(Generator, Test) counts
+%   as a single test. During the execution,   the  concrete tests of the
+%   _forall_ are considered "sub tests".
 
-count_tests(Spec, Count) :-
-    count_tests(Spec, 0, Count).
+count_tests(Units, Count) :-
+    foldl(count_tests_in_unit, Units, 0, Count).
 
-count_tests([], Count, Count) :-
-    !.
-count_tests([H|T], Count0, Count) :-
-    !,
-    count_tests(H, Count0, Count1),
-    count_tests(T, Count1, Count).
-count_tests(Spec, Count0, Count) :-
+count_tests_in_unit(Spec, Count0, Count) :-
     unit_from_spec(Spec, Unit, Tests, _Module, UnitOptions),
     (   option(blocked(_Reason), UnitOptions)
     ->  Count = Count0
     ;   var(Tests)
-    ->  count(( current_test(Unit,_,_,_,TestOptions),
-                \+ option(blocked(_), TestOptions)), N),
+    ->  count(nonblocked_test(Unit,_), N),
 	Count is Count0+N
     ;   atom(Tests),
 	current_test(Unit,Tests,_,_,_)
     ->  Count is Count0+1
     ;   is_list(Tests)
-    ->  count((member(T, Tests), current_test(Unit,T,_,_,_)), N),
+    ->  count((member(T, Tests), nonblocked_test(Unit,T)), N),
 	Count is Count0+N
     ;   Count = Count0
     ).
 
-
+nonblocked_test(Unit, Test) :-
+    current_test(Unit, Test, _, _, TestOptions),
+    \+ option(blocked(_), TestOptions).
 
 
 :- if(current_prolog_flag(threads, true)).
@@ -1457,7 +1457,6 @@ current_test_unit(Unit, UnitOptions) :-
     current_unit(Unit, _Module, _Supers, UnitOptions).
 
 
-:- meta_predicate count(0, -).
 count(Goal, Count) :-
     aggregate_all(count, Goal, Count).
 
@@ -1673,7 +1672,7 @@ progress(Unit, Name, forall(end, N), Time) =>
     test_count(Total),
     print_message(information, plunit(progress(Unit, Name, forall(FTotal,FFailed), N/Total, Time))).
 progress(Unit,  @(Name,Vars,N), Result, Time) =>
-    with_mutex(plunit,
+    with_mutex(plunit_forall_counter,
                incr_forall_result(Unit, Name, Result, I)),
     test_count(Total),
     print_message(information, plunit(progress(Unit, @(Name,Vars), Result, (N-I)/Total, Time))).
