@@ -1038,7 +1038,6 @@ test_caps(Type, Unit, Name, Line, Options, Body, Result, Key) :-
     Key \== setup_failed.
 
 :- det(result_to_key/2).
-result_to_key(blocked(_, _, _, _), blocked).
 result_to_key(failure(_, _, _, How0, _), failure(How1)) :-
     ( How0 = succeeded(_T) -> How1 = succeeded ; How0 = How1 ).
 result_to_key(success(_, _, _, Determinism, _), success(Determinism)).
@@ -1050,9 +1049,6 @@ report_result(Result, Output, Options) :-
     print_test_output(Result, Output, GlobalOptions),
     report_result(Result, Options).
 
-report_result(blocked(Unit, Name, Line, Reason), _) :-
-    !,
-    assert(blocked(Unit, Name, Line, Reason)).
 report_result(failure(Unit, Name, Line, How, Time), Options) :-
     !,
     failure(Unit, Name, Line, How, Time, Options).
@@ -1087,7 +1083,6 @@ print_test_output(_, _, _).
 %   (blocked, conditions fails), setup and cleanup at the test level.
 %   Result is one of:
 %
-%     - blocked(Unit, Name, Line, Reason)
 %     - failure(Unit, Name, Line, How, Time)
 %       How is one of:
 %       - succeeded
@@ -1102,10 +1097,6 @@ print_test_output(_, _, _).
 %     - success(Unit, Name, Line, Determinism, Time)
 %     - setup_failed(Unit, Name, Line)
 
-run_test_6(Unit, Name, Line, Options, _Body,
-	   blocked(Unit, Name, Line, Reason)) :-
-    option(blocked(Reason), Options),
-    !.
 run_test_6(Unit, Name, Line, Options, Body, Result) :-
     option(setup(_Setup), Options),
     !,
@@ -1520,14 +1511,6 @@ report :-
 	report_sto(STO),
 	report_timeout(Timeout),
 	info(plunit(passed(Passed)))
-    ).
-
-number_of_clauses(F/A,N) :-
-    (   current_predicate(F/A)
-    ->  functor(G,F,A),
-	findall(t, G, Ts),
-	length(Ts, N)
-    ;   N = 0
     ).
 
 report_blocked(0) =>
