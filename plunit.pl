@@ -1545,20 +1545,19 @@ report :-
     print_message(silent, plunit(Summary)),
     _{ passed:Passed,
        failed:Failed,
-       failed_assertions:FailedAssertion,
+       failed_assertions:_FailedAssertion,
        timeout:Timeout,
        blocked:Blocked,
        sto:STO
      } :< Summary,
-    (   Passed+Failed+FailedAssertion+Timeout+Blocked+STO =:= 0
+    (   Passed+Failed+Timeout+Blocked+STO =:= 0
     ->  info(plunit(no_tests))
-    ;   Failed+FailedAssertion+Timeout+Blocked+STO =:= 0
+    ;   Failed+Timeout+Blocked+STO =:= 0
     ->  report_fixme,
         test_count(Total),
 	info(plunit(all_passed(Total, Passed)))
     ;   report_blocked(Blocked),
 	report_fixme,
-	report_failed_assertions(FailedAssertion),
 	report_failed(Failed),
 	report_sto(STO),
 	report_timeout(Timeout),
@@ -1578,9 +1577,6 @@ report_blocked(Blocked) =>
 
 report_failed(Failed) :-
     print_message(error, plunit(failed(Failed))).
-
-report_failed_assertions(FailedAssertion) :-
-    print_message(error, plunit(failed_assertions(FailedAssertion))).
 
 report_timeout(Count) :-
     print_message(warning, plunit(timeout(Count))).
