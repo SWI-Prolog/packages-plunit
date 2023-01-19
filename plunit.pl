@@ -1578,16 +1578,16 @@ report_blocked(Blocked) =>
     ).
 
 report_failed(Failed) :-
-    info(plunit(failed(Failed))).
+    print_message(error, plunit(failed(Failed))).
 
 report_failed_assertions(FailedAssertion) :-
-    info(plunit(failed_assertions(FailedAssertion))).
+    print_message(error, plunit(failed_assertions(FailedAssertion))).
 
 report_timeout(Count) :-
-    info(plunit(timeout(Count))).
+    print_message(warning, plunit(timeout(Count))).
 
 report_sto(STO) :-
-    info(plunit(sto(STO))).
+    print_message(error, plunit(sto(STO))).
 
 report_fixme :-
     report_fixme(_,_,_).
