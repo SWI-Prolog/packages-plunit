@@ -767,10 +767,10 @@ run_unit(Unit:Tests) =>
     unit_module(Unit, Module),
     unit_options(Unit, UnitOptions),
     (   setup(Module, unit(Unit), UnitOptions)
-    ->  info(plunit(begin(Spec))),
+    ->  info(plunit(begin(Unit))),
         call_time(run_unit_2(Unit, Tests), Time),
         test_summary(Unit, Summary),
-        info(plunit(end(Spec, Summary.put(time, Time)))),
+        info(plunit(end(Unit, Summary.put(time, Time)))),
         cleanup(Module, UnitOptions)
     ).
 
