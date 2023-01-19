@@ -918,9 +918,9 @@ test_assertion_failed(Reason, Goal) :-
     ),
     current_test_flag(test_options, Options),
     report_failed_assertion(Unit, Test, Line, AssertLoc,
-			    STO, Reason, Goal, Options),
+			    Progress, Reason, Goal, Options),
     assert_cyclic(failed_assertion(Unit, Test, Line, AssertLoc,
-				   STO, Reason, Goal)).
+				   Progress, Reason, Goal)).
 
 assertion_location(Stack, File:Line) :-
     append(_, [AssertFrame,CallerFrame|_], Stack),
@@ -930,11 +930,11 @@ assertion_location(Stack, File:Line) :-
     prolog_stack_frame_property(CallerFrame, location(File:Line)).
 
 report_failed_assertion(Unit, Test, Line, AssertLoc,
-			STO, Reason, Goal, _Options) :-
+			Progress, Reason, Goal, _Options) :-
     print_message(
 	error,
 	plunit(failed_assertion(Unit, Test, Line, AssertLoc,
-				STO, Reason, Goal))).
+				Progress, Reason, Goal))).
 
 :- else.
 
@@ -1101,7 +1101,7 @@ report_result(success(Unit, Name, Line, Determinism, Time), Progress, Options) :
 report_result(setup_failed(_Unit, _Name, _Line), _Progress, _Options).
 report_result(sto(Unit, Name, Line, ResultByType), Progress, Options) :-
     assert(sto(Unit, Name, Line, ResultByType)),
-    print_message(error, plunit(sto(Unit, Name, Line))),
+    print_message(error, plunit(sto(Unit, Name, Line, Progress))),
     report_sto_results(ResultByType, Progress, Options).
 
 report_sto_results([], _, _).
@@ -1450,8 +1450,8 @@ assert_cyclic(Term) :-
 %   Maintain running/5 and report a test has started/is ended using
 %   a =silent= message:
 %
-%       * plunit(begin(Unit:Test, File:Line, STO))
-%       * plunit(end(Unit:Test, File:Line, STO))
+%       * plunit(begin(Unit:Test, File:Line, Progress))
+%       * plunit(end(Unit:Test, File:Line, Progress))
 %
 %   @see message_hook/3 for intercepting these messages
 
@@ -1602,10 +1602,10 @@ fixme(How, Tuples, Count) :-
 
 report_failure(Unit, Name, Progress, _, assertion, Time, _) =>
     progress(Unit, Name, Progress, assertion, Time).
-report_failure(Unit, Name, _, Line, timeout(Limit), _Time, _Options) =>
-    print_message(warning, plunit(timeout(Unit, Name, Line, Limit))).
-report_failure(Unit, Name, _, Line, Error, _Time, _Options) =>
-    print_message(error, plunit(failed(Unit, Name, Line, Error))).
+report_failure(Unit, Name, Progress, Line, timeout(Limit), _Time, _Options) =>
+    print_message(warning, plunit(timeout(Unit, Name, Progress, Line, Limit))).
+report_failure(Unit, Name, Progress, Line, Error, _Time, _Options) =>
+    print_message(error, plunit(failed(Unit, Name, Progress, Line, Error))).
 
 
 %!  test_report(+What) is det.
@@ -1807,7 +1807,7 @@ message(plunit(blocked(N))) -->
     [ '~D tests are blocked:'-[N] ].
 message(plunit(blocked(Pos, Name, Reason))) -->
     locationprefix(Pos),
-    test_name(Name),
+    test_name(Name, -),
     [ ': ~w'-[Reason] ].
 
 					% fail/success
@@ -1864,24 +1864,24 @@ message(plunit(fixme(Failed,Passed,Nondet))) -->
     { TotalPassed is Passed+Nondet },
     [ 'FIXME: ~D failed; ~D passed; (~D nondet)'-
       [Failed, TotalPassed, Nondet] ].
-message(plunit(failed(Unit, Name, Line, Failure))) -->
+message(plunit(failed(Unit, Name, Progress, Line, Failure))) -->
     { unit_file(Unit, File) },
     locationprefix(File:Line),
-    test_name(Name),
+    test_name(Name, Progress),
     [': '-[] ],
     failure(Failure).
-message(plunit(timeout(Unit, Name, Line, Limit))) -->
+message(plunit(timeout(Unit, Name, Progress, Line, Limit))) -->
     { unit_file(Unit, File) },
     locationprefix(File:Line),
-    test_name(Name),
+    test_name(Name, Progress),
     [': '-[] ],
     timeout(Limit).
 :- if(swi).
 message(plunit(failed_assertion(Unit, Name, Line, AssertLoc,
-				_STO, Reason, Goal))) -->
+				Progress, Reason, Goal))) -->
     { unit_file(Unit, File) },
     locationprefix(File:Line),
-    test_name(Name),
+    test_name(Name, Progress),
     [ ': assertion'-[] ],
     assertion_location(AssertLoc, File),
     assertion_reason(Reason), ['\n\t'],
@@ -1937,10 +1937,10 @@ message(plunit(error(Where, Context, Exception))) -->
     [ 'error in ~w: ~w'-[Where, String] ].
 
 					% STO messages
-message(plunit(sto(Unit, Name, Line))) -->
+message(plunit(sto(Unit, Name, Line, Progress))) -->
     { unit_file(Unit, File) },
     locationprefix(File:Line),
-    test_name(Name),
+    test_name(Name, Progress),
     [' is subject to occurs check (STO): '-[] ].
 message(plunit(sto(Type, Result))) -->
     sto_type(Type),
@@ -1962,10 +1962,10 @@ message(interrupt(begin)) -->
     '$messages':prolog_message(interrupt(begin)).
 :- endif.
 
-test_name(@(Name,Bindings)) -->
+test_name(Name, forall(Bindings, _Nth-I)) -->
     !,
-    [ 'test ~w (forall bindings = ~p)'-[Name, Bindings] ].
-test_name(Name) -->
+    [ 'test ~w (~d-th forall bindings = ~p)'-[Name, I, Bindings] ].
+test_name(Name, _) -->
     !,
     [ 'test ~w'-[Name] ].
 
