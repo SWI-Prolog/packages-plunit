@@ -1463,13 +1463,15 @@ begin_test(Unit, Test, Line, Progress) :-
     thread_self(Me),
     assert(running(Unit, Test, Line, Progress, Me)),
     unit_file(Unit, File),
-    print_message(silent, plunit(begin(Unit:Test, File:Line, Progress))).
+    test_count(Total),
+    print_message(silent, plunit(begin(Unit:Test, File:Line, Progress/Total))).
 
 end_test(Unit, Test, Line, Progress) :-
     thread_self(Me),
     retractall(running(_,_,_,_,Me)),
     unit_file(Unit, File),
-    print_message(silent, plunit(end(Unit:Test, File:Line, Progress))).
+    test_count(Total),
+    print_message(silent, plunit(end(Unit:Test, File:Line, Progress/Total))).
 
 %!  running_tests is det.
 %
