@@ -627,7 +627,9 @@ capture_output(Goal, Output, Options) :-
     (   How == always
     ->  call(Goal)
     ;   with_output_to(string(Output), Goal,
-                       [ capture([user_output, user_error])])
+                       [ capture([user_output, user_error]),
+                         color(true)
+                       ])
     ).
 
 
@@ -910,7 +912,7 @@ cleanup_trap_assertions(Ref) :-
 
 test_assertion_failed(Reason, Goal) :-
     thread_self(Me),
-    running(Unit, Test, Line, STO, Me),
+    running(Unit, Test, Line, Progress, Me),
     (   catch(get_prolog_backtrace(10, Stack), _, fail),
 	assertion_location(Stack, AssertLoc)
     ->  true
@@ -1113,11 +1115,14 @@ report_sto_results([r(Type,Result,Output)|T], Progress, Options) :-
 print_test_output(Result, Output, Options) :-
     Output \== "",
     option(output(on_failure), Options),
-    result_to_key(Result, Key),
-    Key \= success(_),
+    print_output(Result, Level),
     !,
-    ansi_format(code, '~N~s', [Output]).     % Use print_message(test(output), Output)?
+    print_message(debug, plunit(test_output(Level, Output))).
 print_test_output(_, _, _).
+
+print_output(success(Unit, Name, Line, _Determinism, _Time), error) :-
+    failed_assertion(Unit, Name, Line, _,_,_,_).
+print_output(_, informational).
 
 
 %!  run_test_6(+Unit, +Name, +Line, +Options, :Body, -Result) is det.
@@ -1946,6 +1951,9 @@ message(plunit(sto(Type, Result))) -->
     sto_type(Type),
     sto_result(Result).
 
+                                        % delayed output
+message(plunit(test_output(_, Output))) -->
+    [ '~s'-[Output] ].
 					% Interrupts (SWI)
 :- if(swi).
 message(interrupt(begin)) -->
