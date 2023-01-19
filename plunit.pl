@@ -731,8 +731,9 @@ runnable_test(Unit, Test, Module, @(Test,Line)) :-
     ;   condition(Module, test(Unit,Test,Line), TestOptions)
     ).
 
-unit_from_spec(Unit0:Tests, Unit, Tests, Module, Options), atom(Unit0) =>
+unit_from_spec(Unit0:Tests0, Unit, Tests, Module, Options), atom(Unit0) =>
     Unit = Unit0,
+    Tests = Tests0,
     (   current_unit(Unit, Module, _Supers, Options)
     ->  true
     ;   throw_error(existence_error(unit_test, Unit), _)
