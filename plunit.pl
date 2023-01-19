@@ -580,7 +580,7 @@ test_set_option(setup(X)) :-
 test_set_option(cleanup(X)) :-
     must_be(callable, X).
 test_set_option(sto(V)) :-
-    nonvar(V), member(V, [finite_trees, rational_trees]).
+    must_be(oneof([false,true,finite_trees,rational_trees]), V).
 test_set_option(concurrent(V)) :-
     must_be(boolean, V).
 test_set_option(timeout(Seconds)) :-
@@ -994,12 +994,13 @@ incr_forall(State, I) :-
 %!  run_test_once6(+Unit, +Name, +Progress, +Line, +UnitOptions,
 %!                 +Options, +Body)
 %
-%   Inherit the timeout option (Global -> Unit -> Test).
+%   Inherit the `timeout` and `sto` option (Global -> Unit -> Test).
 
 run_test_once6(Unit, Name, Progress, Line, UnitOptions, Options, Body) :-
     current_test_flag(test_options, GlobalOptions),
-    inherit_option(timeout, Options, [UnitOptions, GlobalOptions], Options1),
-    run_test_once(Unit, Name, Progress, Line, Options1, Body).
+    inherit_option(timeout, Options,  [UnitOptions, GlobalOptions], Options1),
+    inherit_option(sto,     Options1, [UnitOptions, GlobalOptions], Options2),
+    run_test_once(Unit, Name, Progress, Line, Options2, Body).
 
 inherit_option(Name, Options0, Chain, Options) :-
     Term =.. [Name,_Value],
@@ -1017,30 +1018,27 @@ inherit_option(Name, Options0, Chain, Options) :-
 %   unification settings wrt. the occurs check.
 
 run_test_once(Unit, Name, Progress, Line, Options, Body) :-
-    current_test_flag(test_options, GlobalOptions),
-    option(sto(false), GlobalOptions, false),
+    option(sto(false), Options, false),
     !,
+    current_test_flag(test_options, GlobalOptions),
     begin_test(Unit, Name, Line, Progress),
     capture_output(run_test_6(Unit, Name, Line, Options, Body, Result),
                    Output, GlobalOptions),
     end_test(Unit, Name, Line, Progress),
     report_result(Result, Progress, Output, Options).
 run_test_once(Unit, Name, Progress, Line, Options, Body) :-
-    unit_options(Unit, UnitOptions),
-    option(sto(Type), UnitOptions),
-    \+ option(sto(_), Options),
-    !,
-    current_unification_capability(Cap0),
-    call_cleanup(run_test_cap(Unit, Name, Progress, Line, [sto(Type)|Options], Body),
-		 set_unification_capability(Cap0)).
-run_test_once(Unit, Name, Progress, Line, Options, Body) :-
     current_unification_capability(Cap0),
     call_cleanup(run_test_cap(Unit, Name, Progress, Line, Options, Body),
 		 set_unification_capability(Cap0)).
 
+%!  run_test_cap(+Unit, +Name, +Progress, +Line, +Options, +Body)
+%
+%   Run a test in a particular STO mode or in all available STO modes.
+
 run_test_cap(Unit, Name, Progress, Line, Options, Body) :-
     current_test_flag(test_options, GlobalOptions),
-    (   option(sto(Type), Options)
+    (   option(sto(Type), Options),
+        Type \== true
     ->  unification_capability(Type),
 	set_unification_capability(Type),
 	begin_test(Unit, Name, Line, Progress),
@@ -1048,10 +1046,12 @@ run_test_cap(Unit, Name, Progress, Line, Options, Body) :-
                        Output, GlobalOptions),
 	end_test(Unit, Name, Line, Progress),
 	report_result(Result, Progress, Output, Options)
-    ;   findall(Key-(r(Type,Result,Output)),
-                capture_output(test_caps(Type, Unit, Name, Progress, Line,
-                                         Options, Body, Result, Key),
-                               Output, GlobalOptions),
+    ;   findall(Key-(r(UType,Result,Output)),
+                ( unification_capability(UType),
+                  capture_output(test_caps(UType, Unit, Name, Progress, Line,
+                                           Options, Body, Result, Key),
+                                 Output, GlobalOptions)
+                ),
                 Pairs0),
         keysort(Pairs0, Pairs),
 	group_pairs_by_key(Pairs, Keyed),
@@ -1066,12 +1066,11 @@ run_test_cap(Unit, Name, Progress, Line, Options, Body) :-
     ).
 
 %!  test_caps(-Type, +Unit, +Name, Progress, +Line,
-%!            +Options, +Body, -Result, -Key) is nondet.
+%!            +Options, +Body, -Result, -Key) is semidet.
 %
 %   Run the test with each defined unification capability.
 
 test_caps(Type, Unit, Name, Progress0, Line, Options, Body, Result, Key) :-
-    unification_capability(Type),
     Progress = sto(Progress0, Type),
     set_unification_capability(Type),
     begin_test(Unit, Name, Line, Progress),
