@@ -765,6 +765,8 @@ count_tests_in_unit(_Unit:Tests, Count0, Count) :-
 %   Run a single test unit. Unit is a  term Unit:Tests, where Tests is a
 %   list of tests to run.
 
+run_unit(_Unit:[]) =>
+    true.
 run_unit(Unit:Tests) =>
     unit_module(Unit, Module),
     unit_options(Unit, UnitOptions),
