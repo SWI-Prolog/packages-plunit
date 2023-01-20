@@ -218,7 +218,7 @@ set_test_options(Options) :-
 global_test_option(load(Load)) :-
     must_be(oneof([never,always,normal]), Load).
 global_test_option(output(Cond)) :-
-    must_be(oneof([always,never, on_failure]), Cond).
+    must_be(oneof([always,on_failure]), Cond).
 global_test_option(run(When)) :-
     must_be(oneof([manual,make,make(all)]), When).
 global_test_option(silent(Bool)) :-
@@ -1300,13 +1300,13 @@ match_error(Expect, Rec) :-
 setup(Module, Context, Options) :-
     option(setup(Setup), Options),
     !,
-    (   catch(call_ex(Module, Setup), E, true)
-    ->  (   var(E)
-	->  true
-	;   print_message(error, plunit(error(setup, Context, E))),
-	    fail
-	)
-    ;   print_message(error, error(goal_failed(Setup), _)),
+    current_test_flag(test_options, GlobalOptions),
+    capture_output(reify(call_ex(Module, Setup), Result),
+		   Output, GlobalOptions),
+    (   Result == true
+    ->  true
+    ;   print_message(error,
+		      plunit(error(setup, Context, Output, Result))),
 	fail
     ).
 setup(_,_,_).
@@ -1318,13 +1318,16 @@ setup(_,_,_).
 condition(Module, Context, Options) :-
     option(condition(Cond), Options),
     !,
-    (   catch(call_ex(Module, Cond), E, true)
-    ->  (   var(E)
-	->  true
-	;   print_message(error, plunit(error(condition, Context, E))),
-	    fail
-	)
-    ;   fail
+    current_test_flag(test_options, GlobalOptions),
+    capture_output(reify(call_ex(Module, Cond), Result),
+		   Output, GlobalOptions),
+    (   Result == true
+    ->  true
+    ;   Result == false
+    ->  fail
+    ;   print_message(error,
+		      plunit(error(condition, Context, Output, Result))),
+	fail
     ).
 condition(_, _, _).
 
@@ -1335,7 +1338,7 @@ condition(_, _, _).
 
 call_ex(Module, Goal) :-
     Module:(expand_goal(Goal, GoalEx),
-		GoalEx).
+	    GoalEx).
 
 %!  cleanup(+Module, +Options) is det.
 %
@@ -2006,10 +2009,13 @@ result(forall(_,_))   --> [].
 
 :- endif.
 					% Setup/condition errors
-message(plunit(error(Where, Context, Exception))) -->
+message(plunit(error(Where, Context, _Output, throw(Exception)))) -->
     locationprefix(Context),
     { message_to_string(Exception, String) },
     [ 'error in ~w: ~w'-[Where, String] ].
+message(plunit(error(Where, Context, _Output, false))) -->
+    locationprefix(Context),
+    [ 'setup failed in ~w'-[Where] ].
 
 					% STO messages
 message(plunit(sto(Unit, Name, Line, Progress))) -->
