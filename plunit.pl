@@ -65,7 +65,6 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 :- autoload(library(thread), [concurrent_forall/2]).
 :- autoload(library(aggregate), [aggregate_all/3]).
 :- autoload(library(streams), [with_output_to/3]).
-:- autoload(library(ansi_term), [ansi_format/3]).
 :- autoload(library(time), [call_with_time_limit/2]).
 
 :- meta_predicate
@@ -78,45 +77,6 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 
 :- discontiguous
     user:term_expansion/2.
-
-:- dynamic
-    include_code/1.
-
-including :-
-    include_code(X),
-    !,
-    X == true.
-including.
-
-if_expansion((:- if(G)), []) :-
-    (   including
-    ->  (   catch(G, E, (print_message(error, E), fail))
-	->  asserta(include_code(true))
-	;   asserta(include_code(false))
-	)
-    ;   asserta(include_code(else_false))
-    ).
-if_expansion((:- else), []) :-
-    (   retract(include_code(X))
-    ->  (   X == true
-	->  X2 = false
-	;   X == false
-	->  X2 = true
-	;   X2 = X
-	),
-	asserta(include_code(X2))
-    ;   throw_error(context_error(no_if),_)
-    ).
-if_expansion((:- endif), []) :-
-    retract(include_code(_)),
-    !.
-
-if_expansion(_, []) :-
-    \+ including.
-
-user:term_expansion(In, Out) :-
-    prolog_load_context(module, plunit),
-    if_expansion(In, Out).
 
 swi     :- catch(current_prolog_flag(dialect, swi), _, fail), !.
 swi     :- catch(current_prolog_flag(dialect, yap), _, fail).
@@ -1122,6 +1082,7 @@ print_test_output(Result, Output, Options) :-
 print_test_output(_, _, _).
 
 print_output(success(Unit, Name, Line, _Determinism, _Time), error) :-
+    !,
     failed_assertion(Unit, Name, Line, _,_,_,_).
 print_output(_, informational).
 
@@ -1291,7 +1252,7 @@ cmp(Var =@= Value, Var, variant, Value). % variant/2 is the same =@=
 %   True if Goal succeeded.  Det is unified to =true= if Goal left
 %   no choicepoints and =false= otherwise.
 
-:- if((swi|sicstus)).
+:- if((swi;sicstus)).
 call_det(Goal, Det) :-
     call_cleanup(Goal,Det0=true),
     ( var(Det0) -> Det = false ; Det = true ).
