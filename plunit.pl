@@ -202,6 +202,10 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
 %      If `true` (default `false`), run all tests in a unit
 %      concurrently.
 %
+%    - jobs(Num)
+%      Number of jobs to use for concurrent testing.  Defaults
+%      to the number of cores.
+%
 %    - timeout(+Seconds)
 %      Set timeout for each individual test.  This acts as a
 %      default that may be overuled at the level of units or
@@ -225,6 +229,8 @@ global_test_option(cleanup(Bool)) :-
     must_be(boolean, Bool).
 global_test_option(concurrent(Bool)) :-
     must_be(boolean, Bool).
+global_test_option(jobs(Count)) :-
+    must_be(positive_integer, Count).
 global_test_option(timeout(Number)) :-
     must_be(number, Number).
 
@@ -636,9 +642,12 @@ run_tests_sync(Units) :-
     count_tests(Units, Count),
     asserta(test_count(Count)),
     setup_call_cleanup(
-	setup_trap_assertions(Ref),
-	run_units_and_check_errors(Units),
-	report_and_cleanup(Ref)).
+	setup_jobs(Count),
+	setup_call_cleanup(
+	    setup_trap_assertions(Ref),
+	    run_units_and_check_errors(Units),
+	    report_and_cleanup(Ref)),
+	cleanup_jobs).
 
 %!  report_and_cleanup(+Ref)
 %
@@ -655,7 +664,8 @@ report_and_cleanup(Ref) :-
 %   Run all test units and succeed if all tests passed.
 
 run_units_and_check_errors(Units) :-
-    maplist(run_unit, Units),
+    maplist(schedule_unit, Units),
+    job_wait,
     all_tests_passed(_).
 
 %!  runnable_tests(+Spec, -Plan) is det.
@@ -731,13 +741,20 @@ run_unit(Unit:Tests) =>
     unit_module(Unit, Module),
     unit_options(Unit, UnitOptions),
     (   setup(Module, unit(Unit), UnitOptions)
-    ->  info(plunit(begin(Unit))),
+    ->  begin_unit(Unit),
         call_time(run_unit_2(Unit, Tests), Time),
         test_summary(Unit, Summary),
-        info(plunit(end(Unit, Summary.put(time, Time)))),
+	end_unit(Unit, Summary.put(time, Time)),
         cleanup(Module, UnitOptions)
     ).
 
+begin_unit(Unit) :-
+    job_info(begin(unit(Unit))),
+    info(plunit(begin(Unit))).
+
+end_unit(Unit, Summary) :-
+    job_info(end(unit(Unit, Summary))),
+    info(plunit(end(Unit, Summary))).
 
 :- if(current_prolog_flag(threads, true)).
 run_unit_2(Unit, Tests) :-
@@ -1405,6 +1422,99 @@ assert_cyclic(Term) :-
 assert_cyclic(Term) :-
     assert(Term).
 :- endif.
+
+
+		 /*******************************
+		 *             JOBS             *
+		 *******************************/
+
+:- if(current_prolog_flag(threads, true)).
+
+:- dynamic
+       job_data/2,		% Queue, Threads
+       scheduled_unit/1.
+
+schedule_unit(_:[]) :-
+    !.
+schedule_unit(UnitAndTests) :-
+    UnitAndTests = Unit:_Tests,
+    job_data(Queue, _),
+    !,
+    assertz(scheduled_unit(Unit)),
+    thread_send_message(Queue, unit(UnitAndTests)).
+schedule_unit(Unit) :-
+    run_unit(Unit).
+
+%!  setup_jobs(+Count) is det.
+%
+%   Setup threads for concurrent testing.
+
+setup_jobs(Count) :-
+    current_prolog_flag(cpu_count, Cores),
+    current_test_flag(test_options, Options),
+    option(concurrent(true), Options),
+    option(jobs(Jobs0), Options, Cores),
+    Jobs is min(Count, Jobs0),
+    Jobs > 1,
+    !,
+    message_queue_create(Q, [alias(plunit_jobs)]),
+    length(TIDs, Jobs),
+    foldl(create_plunit_job(Q), TIDs, 1, _),
+    asserta(job_data(Q, TIDs)),
+    print_message(silent, plunit(jobs(Jobs))).
+setup_jobs(_) :-
+    print_message(silent, plunit(jobs(1))).
+
+create_plunit_job(Q, TID, N, N1) :-
+    N1 is N + 1,
+    atom_concat(plunit_job_, N, Alias),
+    thread_create(plunit_job(Q), TID, [alias(Alias)]).
+
+plunit_job(Queue) :-
+    repeat,
+    (   catch(thread_get_message(Queue, Job), error(_,_), fail)
+    ->  job(Job),
+	fail
+    ;   !
+    ).
+
+job(unit(Unit:Tests)) =>
+    run_unit(Unit:Tests).
+
+cleanup_jobs :-
+    retract(job_data(Queue, TIDSs)),
+    !,
+    message_queue_destroy(Queue),
+    maplist(thread_join, TIDSs).
+cleanup_jobs.
+
+%!  job_wait is det.
+%
+%   Wait for all test jobs to finish.
+
+job_wait :-
+    thread_wait(\+ scheduled_unit(_),
+		[ wait_preds([scheduled_unit/1])
+		]).
+
+job_info(begin(unit(_Unit))) =>
+    true.
+job_info(end(unit(Unit, _Summary))) =>
+    retractall(scheduled_unit(Unit)).
+
+:- else.			% No jobs
+
+schedule_unit(Unit) :-
+    run_unit(Unit).
+
+setup_jobs(_) :-
+    print_message(silent, plunit(jobs(1))).
+cleanup_jobs.
+job_wait.
+job_info(_).
+
+:- endif.
+
 
 
 		 /*******************************
