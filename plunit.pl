@@ -746,6 +746,7 @@ run_unit(Unit:Tests) =>
         test_summary(Unit, Summary),
 	end_unit(Unit, Summary.put(time, Time)),
         cleanup(Module, UnitOptions)
+    ;   job_info(end(unit(Unit, _{error:setup_failed})))
     ).
 
 begin_unit(Unit) :-
@@ -1475,7 +1476,10 @@ create_plunit_job(Q, TID, N, N1) :-
 
 plunit_job(Queue) :-
     repeat,
-    (   catch(thread_get_message(Queue, Job), error(_,_), fail)
+    (   catch(thread_get_message(Queue, Job,
+				 [ timeout(10)
+				 ]),
+	      error(_,_), fail)
     ->  job(Job),
 	fail
     ;   !
@@ -1497,8 +1501,19 @@ cleanup_jobs.
 
 job_wait :-
     thread_wait(\+ scheduled_unit(_),
-		[ wait_preds([scheduled_unit/1])
-		]).
+		[ wait_preds([scheduled_unit/1]),
+		  timeout(1)
+		]),
+    !.
+job_wait :-
+    job_data(_Queue, TIDs),
+    member(TID, TIDs),
+    thread_property(TID, status(running)),
+    !,
+    job_wait.
+job_wait.
+
+
 
 job_info(begin(unit(_Unit))) =>
     true.
