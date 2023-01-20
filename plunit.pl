@@ -58,7 +58,7 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 :- autoload(library(statistics), [call_time/2]).
 :- autoload(library(apply), [maplist/3,include/3]).
 :- autoload(library(lists), [member/2,append/2]).
-:- autoload(library(option), [option/3,option/2]).
+:- autoload(library(option), [option/3,option/2, merge_options/3]).
 :- autoload(library(ordsets), [ord_intersection/3]).
 :- autoload(library(pairs), [group_pairs_by_key/2,pairs_values/2]).
 :- autoload(library(error), [must_be/2]).
@@ -242,7 +242,11 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
 
 set_test_options(Options) :-
     valid_options(Options, global_test_option),
-    set_test_flag(test_options, Options).
+    (   current_test_flag(test_options, OldOptions)
+    ->  merge_options(Options, OldOptions, NewOptions),
+        set_test_flag(test_options, NewOptions)
+    ;   set_test_flag(test_options, Options)
+    ).
 
 global_test_option(load(Load)) :-
     must_be(oneof([never,always,normal]), Load).
