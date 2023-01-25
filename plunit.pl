@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2006-2022, University of Amsterdam
+    Copyright (c)  2006-2023, University of Amsterdam
 			      VU University Amsterdam
 			      CWI, Amsterdam
 			      SWI-Prolog Solutions b.v.
@@ -41,7 +41,8 @@
 	    begin_tests/2,              % +Name, +Options
 	    end_tests/1,                % +Name
 	    run_tests/0,                % Run all tests
-	    run_tests/1,                % Run named test-set
+	    run_tests/1,                % +Tests
+	    run_tests/2,                % +Tests, +Options
 	    load_test_files/1,          % +Options
 	    running_tests/0,            % Prints currently running test
 	    current_test/5,             % ?Unit,?Test,?Line,?Body,?Options
@@ -56,19 +57,24 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 */
 
 :- autoload(library(statistics), [call_time/2]).
-:- autoload(library(apply), [maplist/3,include/3]).
-:- autoload(library(lists), [member/2,append/2]).
-:- autoload(library(option), [option/3,option/2, merge_options/3]).
+:- autoload(library(apply),
+            [maplist/3, include/3, maplist/2, foldl/4, partition/4]).
+:- autoload(library(lists), [member/2, append/2, flatten/2, append/3]).
+:- autoload(library(option),
+            [ option/3, option/2, merge_options/3, select_option/4,
+              select_option/3
+            ]).
 :- autoload(library(ordsets), [ord_intersection/3]).
-:- autoload(library(pairs), [group_pairs_by_key/2,pairs_values/2]).
-:- autoload(library(error), [must_be/2]).
+:- autoload(library(error), [must_be/2, domain_error/2]).
 :- autoload(library(thread), [concurrent_forall/2]).
 :- autoload(library(aggregate), [aggregate_all/3]).
 :- autoload(library(streams), [with_output_to/3]).
+:- autoload(library(time), [call_with_time_limit/2]).
 :- autoload(library(ansi_term), [ansi_format/3]).
 
-:- meta_predicate valid_options(+, 1).
-
+:- meta_predicate
+    valid_options(1, +),
+    count(0, -).
 
 		 /*******************************
 		 *    CONDITIONAL COMPILATION   *
@@ -76,45 +82,6 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 
 :- discontiguous
     user:term_expansion/2.
-
-:- dynamic
-    include_code/1.
-
-including :-
-    include_code(X),
-    !,
-    X == true.
-including.
-
-if_expansion((:- if(G)), []) :-
-    (   including
-    ->  (   catch(G, E, (print_message(error, E), fail))
-	->  asserta(include_code(true))
-	;   asserta(include_code(false))
-	)
-    ;   asserta(include_code(else_false))
-    ).
-if_expansion((:- else), []) :-
-    (   retract(include_code(X))
-    ->  (   X == true
-	->  X2 = false
-	;   X == false
-	->  X2 = true
-	;   X2 = X
-	),
-	asserta(include_code(X2))
-    ;   throw_error(context_error(no_if),_)
-    ).
-if_expansion((:- endif), []) :-
-    retract(include_code(_)),
-    !.
-
-if_expansion(_, []) :-
-    \+ including.
-
-user:term_expansion(In, Out) :-
-    prolog_load_context(module, plunit),
-    if_expansion(In, Out).
 
 swi     :- catch(current_prolog_flag(dialect, swi), _, fail), !.
 swi     :- catch(current_prolog_flag(dialect, yap), _, fail).
@@ -197,7 +164,6 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
    ->  true
    ;   set_test_flag(test_options,
                      [ run(make),       % run tests on make/0
-                       sto(false),
                        output(on_failure)
                      ])
    ).
@@ -214,22 +180,23 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
 %      When the tests are run.  Values are `manual`, `make`
 %      or make(all).
 %
-%    - silent(+Bool)
-%      If `true` (default `false`), report successful tests
-%      using message level `silent`, only printing errors and
-%      warnings.
+%    - format(+Mode)
+%      Currently one of `tty` or `log`.   `tty` uses terminal
+%      control to overwrite successful tests, allowing the
+%      user to see the currently running tests and output
+%      from failed tests.  This is the default of the output
+%      is a tty.  `log` prints a full log of the executed
+%      tests and their result and is intended for non-interactive
+%      usage.
 %
 %    - output(+When)
 %      If `always`, emit all output as it is produced, if `never`,
 %      suppress all output and if `on_failure`, emit the output
 %      if the test fails.
 %
-%    - sto(+Bool)
-%      How to test whether code is subject to occurs check
-%      (STO).  If `false` (default), STO is not considered.
-%      If `true` and supported by the hosting Prolog, code
-%      is run in all supported unification mode and reported
-%      if the results are inconsistent.
+%    - occurs_check(+Mode)
+%      Defines the default for the `occurs_check` flag during
+%      testing.
 %
 %    - cleanup(+Bool)
 %      If `true` (default =false), cleanup report at the end
@@ -239,11 +206,30 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
 %    - concurrent(+Bool)
 %      If `true` (default `false`), run all tests in a unit
 %      concurrently.
+%
+%    - jobs(Num)
+%      Number of jobs to use for concurrent testing.  Defaults
+%      to the number of cores.
+%
+%    - timeout(+Seconds)
+%      Set timeout for each individual test.  This acts as a
+%      default that may be overuled at the level of units or
+%      individual tests.
 
 set_test_options(Options) :-
-    valid_options(Options, global_test_option),
+    select_option(sto(Mode), Options, Options1, _),
+    (   Mode == true
+    ->  print_message(warning, plunit(sto(true)))
+    ;   true
+    ),
+    (   option(jobs(Jobs), Options1),
+	Jobs > 1
+    ->  merge_options([concurrent(true)], Options1, Options2)
+    ;   Options2 = Options1
+    ),
+    valid_options(global_test_option, Options2),
     (   current_test_flag(test_options, OldOptions)
-    ->  merge_options(Options, OldOptions, NewOptions),
+    ->  merge_options(Options2, OldOptions, NewOptions),
         set_test_flag(test_options, NewOptions)
     ;   set_test_flag(test_options, Options)
     ).
@@ -251,18 +237,23 @@ set_test_options(Options) :-
 global_test_option(load(Load)) :-
     must_be(oneof([never,always,normal]), Load).
 global_test_option(output(Cond)) :-
-    must_be(oneof([always,never, on_failure]), Cond).
+    must_be(oneof([always,on_failure]), Cond).
+global_test_option(format(Feedback)) :-
+    must_be(oneof([tty,log]), Feedback).
 global_test_option(run(When)) :-
     must_be(oneof([manual,make,make(all)]), When).
 global_test_option(silent(Bool)) :-
     must_be(boolean, Bool).
-global_test_option(sto(Bool)) :-
-    must_be(boolean, Bool).
+global_test_option(occurs_check(Mode)) :-
+    must_be(oneof([false,true,error]), Mode).
 global_test_option(cleanup(Bool)) :-
     must_be(boolean, Bool).
 global_test_option(concurrent(Bool)) :-
     must_be(boolean, Bool).
-
+global_test_option(jobs(Count)) :-
+    must_be(positive_integer, Count).
+global_test_option(timeout(Number)) :-
+    must_be(number, Number).
 
 %!  loading_tests
 %
@@ -297,10 +288,23 @@ begin_tests(Unit) :-
 
 begin_tests(Unit, Options) :-
     must_be(atom, Unit),
-    valid_options(Options, test_set_option),
+    map_sto_option(Options, Options1),
+    valid_options(test_set_option, Options1),
     make_unit_module(Unit, Name),
     source_location(File, Line),
-    begin_tests(Unit, Name, File:Line, Options).
+    begin_tests(Unit, Name, File:Line, Options1).
+
+map_sto_option(Options0, Options) :-
+    select_option(sto(Mode), Options0, Options1),
+    !,
+    map_sto(Mode, Flag),
+    Options = [occurs_check(Flag)|Options1].
+map_sto_option(Options, Options).
+
+map_sto(rational_trees, Flag) => Flag = false.
+map_sto(finite_trees, Flag)   => Flag = true.
+map_sto(Mode, _) => domain_error(sto, Mode).
+
 
 :- if(swi).
 begin_tests(Unit, Name, File:Line, Options) :-
@@ -414,6 +418,10 @@ expand_test(Name, Options0, Body,
 	    ]) :-
     source_location(_File, Line),
     prolog_load_context(module, Module),
+    (   prolog_load_context(variable_names, Bindings)
+    ->  true
+    ;   Bindings = []
+    ),
     atomic_list_concat([Name, '@line ', Line], Id),
     term_variables(Options0, OptionVars0), sort(OptionVars0, OptionVars),
     term_variables(Body, BodyVars0), sort(BodyVars0, BodyVars),
@@ -423,28 +431,54 @@ expand_test(Name, Options0, Body,
     ->  Options1 = Options0
     ;   Options1 = [Options0]
     ),
-    maplist(expand_option, Options1, Options2),
-    valid_options(Options2, test_option),
-    valid_test_mode(Options2, Options).
+    maplist(expand_option(Bindings), Options1, Options2),
+    join_true_options(Options2, Options3),
+    map_sto_option(Options3, Options4),
+    valid_options(test_option, Options4),
+    valid_test_mode(Options4, Options).
 
-expand_option(Var, _) :-
+expand_option(_, Var, _) :-
     var(Var),
     !,
     throw_error(instantiation_error,_).
-expand_option(A == B, true(A==B)) :- !.
-expand_option(A = B, true(A=B)) :- !.
-expand_option(A =@= B, true(A=@=B)) :- !.
-expand_option(A =:= B, true(A=:=B)) :- !.
-expand_option(error(X), throws(error(X, _))) :- !.
-expand_option(exception(X), throws(X)) :- !. % SICStus 4 compatibility
-expand_option(error(F,C), throws(error(F,C))) :- !. % SICStus 4 compatibility
-expand_option(true, true(true)) :- !.
-expand_option(O, O).
+expand_option(Bindings, Cmp, true(Cond)) :-
+    cmp(Cmp),
+    !,
+    var_cmp(Bindings, Cmp, Cond).
+expand_option(_, error(X), throws(error(X, _))) :- !.
+expand_option(_, exception(X), throws(X)) :- !. % SICStus 4 compatibility
+expand_option(_, error(F,C), throws(error(F,C))) :- !. % SICStus 4 compatibility
+expand_option(_, true, true(true)) :- !.
+expand_option(_, O, O).
+
+cmp(_ == _).
+cmp(_ = _).
+cmp(_ =@= _).
+cmp(_ =:= _).
+
+var_cmp(Bindings, Expr, cmp(Name, Expr)) :-
+    arg(_, Expr, Var),
+    var(Var),
+    member(Name=V, Bindings),
+    V == Var,
+    !.
+var_cmp(_, Expr, Expr).
+
+join_true_options(Options0, Options) :-
+    partition(true_option, Options0, True, Rest),
+    True \== [],
+    !,
+    maplist(arg(1), True, Conds0),
+    flatten(Conds0, Conds),
+    Options = [true(Conds)|Rest].
+join_true_options(Options, Options).
+
+true_option(true(_)).
 
 valid_test_mode(Options0, Options) :-
     include(test_mode, Options0, Tests),
     (   Tests == []
-    ->  Options = [true(true)|Options0]
+    ->  Options = [true([true])|Options0]
     ;   Tests = [_]
     ->  Options = Options0
     ;   throw_error(plunit(incompatible_options, Tests), _)
@@ -523,14 +557,14 @@ is_not(Type, X) :-
     ).
 :- endif.
 
-%!  valid_options(+Options, :Pred) is det.
+%!  valid_options(:Pred, +Options) is det.
 %
 %   Verify Options to be a list of valid options according to
 %   Pred.
 %
-%   @throws =type_error= or =instantiation_error=.
+%   @error `type_error` or `instantiation_error`.
 
-valid_options(Options, Pred) :-
+valid_options(Pred, Options) :-
     must_be(list, Options),
     verify_options(Options, Pred).
 
@@ -541,6 +575,9 @@ verify_options([H|T], Pred) :-
     ;   throw_error(domain_error(Pred, H), _)
     ).
 
+valid_options(Pred, Options0, Options, Rest) :-
+    must_be(list, Options0),
+    partition(Pred, Options0, Options, Rest).
 
 %!  test_option(+Option) is semidet.
 %
@@ -558,6 +595,8 @@ test_option(nondet).
 test_option(fixme(_)).
 test_option(forall(X)) :-
     must_be(callable, X).
+test_option(timeout(Seconds)) :-
+    must_be(number, Seconds).
 
 %!  test_option(+Option) is semidet.
 %
@@ -572,20 +611,39 @@ test_set_option(setup(X)) :-
     must_be(callable, X).
 test_set_option(cleanup(X)) :-
     must_be(callable, X).
-test_set_option(sto(V)) :-
-    nonvar(V), member(V, [finite_trees, rational_trees]).
+test_set_option(occurs_check(V)) :-
+    must_be(oneof([false,true,error]), V).
 test_set_option(concurrent(V)) :-
     must_be(boolean, V).
+test_set_option(timeout(Seconds)) :-
+    must_be(number, Seconds).
 
 		 /*******************************
 		 *             UTIL		*
 		 *******************************/
 
 :- meta_predicate
+       reify_tmo(0, -, +),
        reify(0, -),
        capture_output(0,-,+).
 
+%!  reify_tmo(:Goal, -Result, +Options) is det.
+
+reify_tmo(Goal, Result, Options) :-
+    option(timeout(Time), Options),
+    !,
+    reify(call_with_time_limit(Time, Goal), Result0),
+    (   Result0 = throw(time_limit_exceeded)
+    ->  Result = throw(time_limit_exceeded(Time))
+    ;   Result = Result0
+    ).
+reify_tmo(Goal, Result, _Options) :-
+    reify(Goal, Result).
+
 %!  reify(:Goal, -Result) is det.
+%
+%   Call  Goal  and  unify  Result  with   one  of  `true`,  `false`  or
+%   `throw(E)`.
 
 reify(Goal, Result) :-
     (   catch(Goal, E, true)
@@ -601,7 +659,9 @@ capture_output(Goal, Output, Options) :-
     (   How == always
     ->  call(Goal)
     ;   with_output_to(string(Output), Goal,
-                       [ capture([user_output, user_error])])
+                       [ capture([user_output, user_error]),
+                         color(true)
+                       ])
     ).
 
 
@@ -609,152 +669,222 @@ capture_output(Goal, Output, Options) :-
 		 *        RUNNING TOPLEVEL      *
 		 *******************************/
 
-:- thread_local
+:- dynamic
     test_count/1,                   % Count
     passed/5,                       % Unit, Test, Line, Det, Time
     failed/5,                       % Unit, Test, Line, Reason, Time
+    timeout/5,                      % Unit, Test, Line, Limit, Time
     failed_assertion/7,             % Unit, Test, Line, ALoc, STO, Reason, Goal
     blocked/4,                      % Unit, Test, Line, Reason
-    sto/4,                          % Unit, Test, Line, Results
-    fixme/5.                        % Unit, Test, Line, Reason, Status
-
-:- dynamic
-    running/5.                      % Unit, Test, Line, STO, Thread
+    fixme/5,                        % Unit, Test, Line, Reason, Status
+    running/5,                      % Unit, Test, Line, STO, Thread
+    forall_failures/2.              % Nth, Failures
 
 %!  run_tests is semidet.
 %!  run_tests(+TestSet) is semidet.
+%!  run_tests(+TestSet, +Options) is semidet.
 %
-%   Run  tests  and  report  about    the   results.  The  predicate
-%   run_tests/0 runs all known  tests  that   are  not  blocked. The
-%   predicate run_tests/1 takes a  specification   of  tests to run.
-%   This  is  either  a  single   specification    or   a   list  of
-%   specifications. Each single specification is  either the name of
-%   a test-unit or a term <test-unit>:<test>, denoting a single test
-%   within a unit.
+%   Run tests and report about the   results.  The predicate run_tests/0
+%   runs all known tests that are not blocked. The predicate run_tests/1
+%   takes a specification of tests  to  run.
+%
+%   The predicate run_tests/2 is  synchronized. Concurrent testing may
+%   be     achieved    using     the     relevant    options.      See
+%   set_test_options/1. Options are  passed to set_test_options/1.  In
+%   addition the following options are processed:
+%
+%     - summary(-Summary)
+%       Unify Summary do a dict holding the keys below.  The value of
+%       these keys is an integer describing the number of tests.  If
+%       this option is given, run_tests/2 does not fail if some tests
+%       failed.
+%
+%       - total
+%       - passed
+%       - failed
+%       - timeout
+%       - blocked
+%
+%   @arg  TestSet  is either  a  single  specification  or a  list  of
+%   specifications. Each single specification is  either the name of a
+%   test-unit  or a  term <test-unit>:<test>,  denoting a  single test
+%   within a unit.  If TestSet is `all`, all known tests are executed.
 
 run_tests :-
-    findall(Unit, current_test_unit(Unit,_), Units),
-    run_tests(Units).
+    run_tests(all).
 
 run_tests(Set) :-
+    run_tests(Set, []).
+
+run_tests(all, Options) :-
+    !,
+    findall(Unit, current_test_unit(Unit,_), Units),
+    run_tests(Units, Options).
+run_tests(Set, Options) :-
+    valid_options(global_test_option, Options, Global, Rest),
+    current_test_flag(test_options, Old),
+    setup_call_cleanup(
+	set_test_options(Global),
+	( flatten([Set], List),
+	  maplist(runnable_tests, List, Units),
+	  with_mutex(plunit, run_tests_sync(Units, Rest))
+	),
+	set_test_flag(test_options, Old)).
+
+run_tests_sync(Units, Options) :-
     cleanup,
-    count_tests(Set, Count),
+    count_tests(Units, Count),
     asserta(test_count(Count)),
     setup_call_cleanup(
-	setup_trap_assertions(Ref),
-	run_unit_and_check_errors(Set),
-	report_and_cleanup(Ref)).
+	setup_jobs(Count),
+	setup_call_cleanup(
+	    setup_trap_assertions(Ref),
+	    run_units_and_check_errors(Units, Options),
+	    report_and_cleanup(Ref, Options)),
+	cleanup_jobs).
 
-report_and_cleanup(Ref) :-
+%!  report_and_cleanup(+Ref, +Options)
+%
+%   Undo changes to the environment   (trapping  assertions), report the
+%   results and cleanup.
+
+report_and_cleanup(Ref, _Options) :-
     cleanup_trap_assertions(Ref),
     report,
     cleanup_after_test.
 
-run_unit_and_check_errors(Set) :-
-    run_unit(Set),
-    all_tests_passed(_).
+%!  run_units_and_check_errors(+Units, +Options) is semidet.
+%
+%   Run all test units and succeed if all tests passed.
 
-run_unit([]) :- !.
-run_unit([H|T]) :-
-    !,
-    run_unit(H),
-    run_unit(T).
-run_unit(Spec) :-
+run_units_and_check_errors(Units, Options) :-
+    maplist(schedule_unit, Units),
+    job_wait,
+    test_summary(_All, Summary),
+    (   option(summary(Summary), Options)
+    ->  true
+    ;   test_summary_passed(Summary)
+    ).
+
+%!  runnable_tests(+Spec, -Plan) is det.
+%
+%   Change a Unit+Test spec  into  a   plain  `Unit:Tests`  lists, where
+%   blocked tests or tests whose condition   fails  are already removed.
+%   Each test in `Tests` is a  term   `@(Test,Line)`,  which serves as a
+%   unique identifier of the test.
+
+:- det(runnable_tests/2).
+runnable_tests(Spec, Unit:RunnableTests) :-
     unit_from_spec(Spec, Unit, Tests, Module, UnitOptions),
     (   option(blocked(Reason), UnitOptions)
-    ->  info(plunit(blocked(unit(Unit, Reason))))
-    ;   condition(Module, unit(Unit), UnitOptions)
-    ->  (   setup(Module, unit(Unit), UnitOptions)
-        ->  info(plunit(begin(Spec))),
-            call_time(run_unit_2(Unit, Tests, Module, UnitOptions), Time),
-            test_summary(Unit, Summary),
-            info(plunit(end(Spec, Summary.put(time, Time)))),
-            cleanup(Module, UnitOptions)
-        )
-    ;   true
-    ).
-
-%!  count_tests(+Spec, -Count) is det.
-%
-%   Count the number of tests to run.
-
-count_tests(Spec, Count) :-
-    count_tests(Spec, 0, Count).
-
-count_tests([], Count, Count) :-
-    !.
-count_tests([H|T], Count0, Count) :-
-    !,
-    count_tests(H, Count0, Count1),
-    count_tests(T, Count1, Count).
-count_tests(Spec, Count0, Count) :-
-    unit_from_spec(Spec, Unit, Tests, _Module, UnitOptions),
-    (   option(blocked(_Reason), UnitOptions)
-    ->  Count = Count0
+    ->  info(plunit(blocked(unit(Unit, Reason)))),
+        RunnableTests = []
+    ;   \+ condition(Module, unit(Unit), UnitOptions)
+    ->  RunnableTests = []
     ;   var(Tests)
-    ->  count(( current_test(Unit,_,_,_,TestOptions),
-                \+ option(blocked(_), TestOptions)), N),
-	Count is Count0+N
-    ;   atom(Tests),
-	current_test(Unit,Tests,_,_,_)
-    ->  Count is Count0+1
-    ;   is_list(Tests)
-    ->  count((member(T, Tests), current_test(Unit,T,_,_,_)), N),
-	Count is Count0+N
-    ;   Count = Count0
+    ->  findall(TestID,
+                runnable_test(Unit, _Test, Module, TestID),
+                RunnableTests)
+    ;   flatten([Tests], TestList),
+        findall(TestID,
+                ( member(Test, TestList),
+                  runnable_test(Unit,Test,Module, TestID)
+                ),
+                RunnableTests)
     ).
 
+runnable_test(Unit, Test, Module, @(Test,Line)) :-
+    current_test(Unit, Test, Line, _Body, TestOptions),
+    (   option(blocked(Reason), TestOptions)
+    ->  assert(blocked(Unit, Test, Line, Reason)),
+        fail
+    ;   condition(Module, test(Unit,Test,Line), TestOptions)
+    ).
 
+unit_from_spec(Unit0:Tests0, Unit, Tests, Module, Options), atom(Unit0) =>
+    Unit = Unit0,
+    Tests = Tests0,
+    (   current_unit(Unit, Module, _Supers, Options)
+    ->  true
+    ;   throw_error(existence_error(unit_test, Unit), _)
+    ).
+unit_from_spec(Unit0, Unit, _, Module, Options), atom(Unit0) =>
+    Unit = Unit0,
+    (   current_unit(Unit, Module, _Supers, Options)
+    ->  true
+    ;   throw_error(existence_error(unit_test, Unit), _)
+    ).
 
+%!  count_tests(+Units, -Count) is det.
+%
+%   Count the number of tests to   run. A forall(Generator, Test) counts
+%   as a single test. During the execution,   the  concrete tests of the
+%   _forall_ are considered "sub tests".
+
+count_tests(Units, Count) :-
+    foldl(count_tests_in_unit, Units, 0, Count).
+
+count_tests_in_unit(_Unit:Tests, Count0, Count) :-
+    length(Tests, N),
+    Count is Count0+N.
+
+%!  run_unit(+Unit) is det.
+%
+%   Run a single test unit. Unit is a  term Unit:Tests, where Tests is a
+%   list of tests to run.
+
+run_unit(_Unit:[]) =>
+    true.
+run_unit(Unit:Tests) =>
+    unit_module(Unit, Module),
+    unit_options(Unit, UnitOptions),
+    (   setup(Module, unit(Unit), UnitOptions)
+    ->  begin_unit(Unit),
+        call_time(run_unit_2(Unit, Tests), Time),
+        test_summary(Unit, Summary),
+	end_unit(Unit, Summary.put(time, Time)),
+        cleanup(Module, UnitOptions)
+    ;   job_info(end(unit(Unit, _{error:setup_failed})))
+    ).
+
+begin_unit(Unit) :-
+    job_info(begin(unit(Unit))),
+    job_feedback(informational, begin(Unit)).
+
+end_unit(Unit, Summary) :-
+    job_info(end(unit(Unit, Summary))),
+    job_feedback(informational, end(Unit, Summary)).
 
 :- if(current_prolog_flag(threads, true)).
-run_unit_2(Unit, Tests, Module, UnitOptions) :-
+run_unit_2(Unit, Tests) :-
+    unit_options(Unit, UnitOptions),
     option(concurrent(true), UnitOptions, false),
     current_test_flag(test_options, GlobalOptions),
     option(concurrent(true), GlobalOptions),
     !,
-    concurrent_forall((Module:'unit test'(Name, Line, Options, Body),
-		       matching_test(Name, Tests)),
-		      run_test(Unit, Name, Line, Options, Body)).
+    concurrent_forall(member(Test, Tests),
+                      run_test(Unit, Test)).
 :- endif.
-run_unit_2(Unit, Tests, Module, _UnitOptions) :-
-    forall(( Module:'unit test'(Name, Line, Options, Body),
-	     matching_test(Name, Tests)),
-	   run_test(Unit, Name, Line, Options, Body)).
+run_unit_2(Unit, Tests) :-
+    forall(member(Test, Tests),
+	   run_test(Unit, Test)).
 
 
-unit_from_spec(Unit, Unit, _, Module, Options) :-
-    atom(Unit),
-    !,
-    (   current_unit(Unit, Module, _Supers, Options)
-    ->  true
-    ;   throw_error(existence_error(unit_test, Unit), _)
-    ).
-unit_from_spec(Unit:Tests, Unit, Tests, Module, Options) :-
-    atom(Unit),
-    !,
-    (   current_unit(Unit, Module, _Supers, Options)
-    ->  true
-    ;   throw_error(existence_error(unit_test, Unit), _)
-    ).
+unit_options(Unit, Options) :-
+    current_unit(Unit, _Module, _Supers, Options).
 
-
-matching_test(X, X) :- !.
-matching_test(Name, Set) :-
-    is_list(Set),
-    memberchk(Name, Set).
 
 cleanup :-
-    thread_self(Me),
     set_flag(plunit_test, 1),
     retractall(test_count(_)),
     retractall(passed(_, _, _, _, _)),
     retractall(failed(_, _, _, _, _)),
+    retractall(timeout(_, _, _, _, _)),
     retractall(failed_assertion(_, _, _, _, _, _, _)),
     retractall(blocked(_, _, _, _)),
-    retractall(sto(_, _, _, _)),
     retractall(fixme(_, _, _, _, _)),
-    retractall(running(_,_,_,_,Me)).
+    retractall(running(_,_,_,_,_)),
+    retractall(forall_failures(_,_)).
 
 cleanup_after_test :-
     current_test_flag(test_options, Options),
@@ -806,41 +936,6 @@ make_run_tests(Files) :-
     ;   true
     ).
 
-:- if(swi).
-
-unification_capability(sto_error_incomplete).
-% can detect some (almost all) STO runs
-unification_capability(rational_trees).
-unification_capability(finite_trees).
-
-set_unification_capability(Cap) :-
-    cap_to_flag(Cap, Flag),
-    set_prolog_flag(occurs_check, Flag).
-
-current_unification_capability(Cap) :-
-    current_prolog_flag(occurs_check, Flag),
-    cap_to_flag(Cap, Flag),
-    !.
-
-cap_to_flag(sto_error_incomplete, error).
-cap_to_flag(rational_trees, false).
-cap_to_flag(finite_trees, true).
-
-:- else.
-:- if(sicstus).
-
-unification_capability(rational_trees).
-set_unification_capability(rational_trees).
-current_unification_capability(rational_trees).
-
-:- else.
-
-unification_capability(_) :-
-    fail.
-
-:- endif.
-:- endif.
-
 		 /*******************************
 		 *      ASSERTION HANDLING      *
 		 *******************************/
@@ -859,17 +954,17 @@ cleanup_trap_assertions(Ref) :-
 
 test_assertion_failed(Reason, Goal) :-
     thread_self(Me),
-    running(Unit, Test, Line, STO, Me),
+    running(Unit, Test, Line, Progress, Me),
     (   catch(get_prolog_backtrace(10, Stack), _, fail),
 	assertion_location(Stack, AssertLoc)
     ->  true
     ;   AssertLoc = unknown
     ),
     current_test_flag(test_options, Options),
-    report_failed_assertion(Unit, Test, Line, AssertLoc,
-			    STO, Reason, Goal, Options),
+    report_failed_assertion(Unit:Test, Line, AssertLoc,
+			    Progress, Reason, Goal, Options),
     assert_cyclic(failed_assertion(Unit, Test, Line, AssertLoc,
-				   STO, Reason, Goal)).
+				   Progress, Reason, Goal)).
 
 assertion_location(Stack, File:Line) :-
     append(_, [AssertFrame,CallerFrame|_], Stack),
@@ -878,12 +973,12 @@ assertion_location(Stack, File:Line) :-
     !,
     prolog_stack_frame_property(CallerFrame, location(File:Line)).
 
-report_failed_assertion(Unit, Test, Line, AssertLoc,
-			STO, Reason, Goal, _Options) :-
+report_failed_assertion(UnitTest, Line, AssertLoc,
+			Progress, Reason, Goal, _Options) :-
     print_message(
 	error,
-	plunit(failed_assertion(Unit, Test, Line, AssertLoc,
-				STO, Reason, Goal))).
+	plunit(failed_assertion(UnitTest, Line, AssertLoc,
+				Progress, Reason, Goal))).
 
 :- else.
 
@@ -897,127 +992,107 @@ cleanup_trap_assertions(_).
 		 *         RUNNING A TEST       *
 		 *******************************/
 
-%!  run_test(+Unit, +Name, +Line, +Options, +Body) is det.
+%!  run_test(+Unit, +Test) is det.
 %
 %   Run a single test.
 
-run_test(Unit, Name, Line, Options, Body) :-
+run_test(Unit, @(Test,Line)) :-
+    unit_module(Unit, Module),
+    Module:'unit test'(Test, Line, TestOptions, Body),
+    unit_options(Unit, UnitOptions),
+    run_test(Unit, Test, Line, UnitOptions, TestOptions, Body).
+
+%!  run_test(+Unit, +Name, +Line, +UnitOptions, +Options, +Body)
+%
+%   Deals with forall(Generator, Test)
+
+run_test(Unit, Name, Line, UnitOptions, Options, Body) :-
     option(forall(Generator), Options),
     !,
     unit_module(Unit, Module),
     term_variables(Generator, Vars),
-    forall(Module:Generator,
-	   run_test_once(Unit, @(Name,Vars), Line, Options, Body)).
-run_test(Unit, Name, Line, Options, Body) :-
-    run_test_once(Unit, Name, Line, Options, Body).
+    start_test(Unit, @(Name,Line), Nth),
+    State = state(0),
+    call_time(forall(Module:Generator,                      % may become concurrent
+                     (   incr_forall(State, I),
+                         run_test_once6(Unit, Name, forall(Vars, Nth-I), Line,
+                                        UnitOptions, Options, Body)
+                     )),
+                     Time),
+    arg(1, State, Generated),
+    progress(Unit:Name, Nth, forall(end, Nth, Generated), Time).
+run_test(Unit, Name, Line, UnitOptions, Options, Body) :-
+    start_test(Unit, @(Name,Line), Nth),
+    run_test_once6(Unit, Name, Nth, Line, UnitOptions, Options, Body).
 
-run_test_once(Unit, Name, Line, Options, Body) :-
-    current_test_flag(test_options, GlobalOptions),
-    option(sto(false), GlobalOptions, false),
-    !,
-    current_unification_capability(Type),
-    begin_test(Unit, Name, Line, Type),
-    capture_output(run_test_6(Unit, Name, Line, Options, Body, Result),
-                   Output, GlobalOptions),
-    end_test(Unit, Name, Line, Type),
-    report_result(Result, Output, Options).
-run_test_once(Unit, Name, Line, Options, Body) :-
-    current_unit(Unit, _Module, _Supers, UnitOptions),
-    option(sto(Type), UnitOptions),
-    \+ option(sto(_), Options),
-    !,
-    current_unification_capability(Cap0),
-    call_cleanup(run_test_cap(Unit, Name, Line, [sto(Type)|Options], Body),
-		 set_unification_capability(Cap0)).
-run_test_once(Unit, Name, Line, Options, Body) :-
-    current_unification_capability(Cap0),
-    call_cleanup(run_test_cap(Unit, Name, Line, Options, Body),
-		 set_unification_capability(Cap0)).
+start_test(_Unit, _TestID, Nth) :-
+    flag(plunit_test, Nth, Nth+1).
 
-run_test_cap(Unit, Name, Line, Options, Body) :-
+incr_forall(State, I) :-
+    arg(1, State, I0),
+    I is I0+1,
+    nb_setarg(1, State, I).
+
+%!  run_test_once6(+Unit, +Name, +Progress, +Line, +UnitOptions,
+%!                 +Options, +Body)
+%
+%   Inherit the `timeout` and `occurs_check` option (Global -> Unit -> Test).
+
+run_test_once6(Unit, Name, Progress, Line, UnitOptions, Options, Body) :-
     current_test_flag(test_options, GlobalOptions),
-    (   option(sto(Type), Options)
-    ->  unification_capability(Type),
-	set_unification_capability(Type),
-	begin_test(Unit, Name, Line, Type),
-	capture_output(run_test_6(Unit, Name, Line, Options, Body, Result),
-                       Output, GlobalOptions),
-	end_test(Unit, Name, Line, Type),
-	report_result(Result, Output, Options)
-    ;   findall(Key-(r(Type,Result,Output)),
-                capture_output(test_caps(Type, Unit, Name, Line,
-                                         Options, Body, Result, Key),
-                               Output, GlobalOptions),
-                Pairs0),
-        keysort(Pairs0, Pairs),
-	group_pairs_by_key(Pairs, Keyed),
-	(   Keyed == []
-	->  true
-	;   Keyed = [_-Results]
-	->  Results = [r(_Type,Result,Output)|_],
-	    report_result(Result, Output, Options)          % consistent results
-	;   pairs_values(Pairs, ResultByType),
-	    report_result(sto(Unit, Name, Line, ResultByType), "", Options)
-	)
+    inherit_option(timeout,      Options,  [UnitOptions, GlobalOptions], Options1),
+    inherit_option(occurs_check, Options1, [UnitOptions, GlobalOptions], Options2),
+    run_test_once(Unit, Name, Progress, Line, Options2, Body).
+
+inherit_option(Name, Options0, Chain, Options) :-
+    Term =.. [Name,_Value],
+    (   option(Term, Options0)
+    ->  Options = Options0
+    ;   member(Opts, Chain),
+        option(Term, Opts)
+    ->  Options = [Term|Options0]
+    ;   Options = Options0
     ).
 
-%!  test_caps(-Type, +Unit, +Name, +Line, +Options, +Body, -Result, -Key) is nondet.
+%!  run_test_once(+Unit, +Name, Progress, +Line, +Options, +Body)
+%
+%   Deal with occurs_check, i.e., running the  test multiple times with different
+%   unification settings wrt. the occurs check.
 
-test_caps(Type, Unit, Name, Line, Options, Body, Result, Key) :-
-    unification_capability(Type),
-    set_unification_capability(Type),
-    begin_test(Unit, Name, Line, Type),
-    run_test_6(Unit, Name, Line, Options, Body, Result),
-    end_test(Unit, Name, Line, Type),
-    result_to_key(Result, Key),
-    Key \== setup_failed,
-    Key \== condition_failed.
-
-:- det(result_to_key/2).
-result_to_key(blocked(_, _, _, _), blocked).
-result_to_key(failure(_, _, _, How0, _), failure(How1)) :-
-    ( How0 = succeeded(_T) -> How1 = succeeded ; How0 = How1 ).
-result_to_key(success(_, _, _, Determinism, _), success(Determinism)).
-result_to_key(setup_failed(_,_,_), setup_failed).
-result_to_key(condition_failed(_,_,_), condition_failed).
-
-:- det(report_result/3).
-report_result(Result, Output, Options) :-
+run_test_once(Unit, Name, Progress, Line, Options, Body) :-
+    option(occurs_check(Mode), Options),
+    !,
     current_test_flag(test_options, GlobalOptions),
-    print_test_output(Result, Output, GlobalOptions),
-    report_result(Result, Options).
+    begin_test(Unit, Name, Line, Progress),
+    current_prolog_flag(occurs_check, Old),
+    setup_call_cleanup(
+	set_prolog_flag(occurs_check, Mode),
+	capture_output(run_test_6(Unit, Name, Line, Options, Body, Result),
+		       Output, GlobalOptions),
+	set_prolog_flag(occurs_check, Old)),
+    end_test(Unit, Name, Line, Progress),
+    report_result(Result, Progress, Output, Options).
+run_test_once(Unit, Name, Progress, Line, Options, Body) :-
+    current_test_flag(test_options, GlobalOptions),
+    begin_test(Unit, Name, Line, Progress),
+    capture_output(run_test_6(Unit, Name, Line, Options, Body, Result),
+		   Output, GlobalOptions),
+    end_test(Unit, Name, Line, Progress),
+    report_result(Result, Progress, Output, Options).
 
-report_result(blocked(Unit, Name, Line, Reason), _) :-
-    !,
-    assert(blocked(Unit, Name, Line, Reason)).
-report_result(failure(Unit, Name, Line, How, Time), Options) :-
-    !,
-    failure(Unit, Name, Line, How, Time, Options).
-report_result(success(Unit, Name, Line, Determinism, Time), Options) :-
-    !,
-    success(Unit, Name, Line, Determinism, Time, Options).
-report_result(setup_failed(_Unit, _Name, _Line), _Options).
-report_result(condition_failed(_Unit, _Name, _Line), _Options).
-report_result(sto(Unit, Name, Line, ResultByType), Options) :-
-    assert(sto(Unit, Name, Line, ResultByType)),
-    print_message(error, plunit(sto(Unit, Name, Line))),
-    report_sto_results(ResultByType, Options).
+%!  report_result(+Result, +Progress, +Output, +Options) is det.
 
-report_sto_results([], _).
-report_sto_results([r(Type,Result,Output)|T], Options) :-
-    print_test_output(Result, Output, Options),
-    print_message(error, plunit(sto(Type, Result))),
-    report_sto_results(T, Options).
-
-print_test_output(Result, Output, Options) :-
-    Output \== "",
-    option(output(on_failure), Options),
-    result_to_key(Result, Key),
-    Key \= success(_),
+:- det(report_result/4).
+report_result(failure(Unit, Name, Line, How, Time),
+	      Progress, Output, Options) :-
     !,
-    ansi_format(code, '~N~s', [Output]).     % Use print_message(test(output), Output)?
-print_test_output(_, _, _).
-
+    failure(Unit, Name, Progress, Line, How, Time, Output, Options).
+report_result(success(Unit, Name, Line, Determinism, Time),
+	      Progress, Output, Options) :-
+    !,
+    success(Unit, Name, Progress, Line, Determinism, Time, Output, Options).
+report_result(setup_failed(_Unit, _Name, _Line),
+	      _Progress, _Output, _Options).
 
 %!  run_test_6(+Unit, +Name, +Line, +Options, :Body, -Result) is det.
 %
@@ -1025,12 +1100,11 @@ print_test_output(_, _, _).
 %   (blocked, conditions fails), setup and cleanup at the test level.
 %   Result is one of:
 %
-%     - blocked(Unit, Name, Line, Reason)
-%     - condition_failed(Unit, Name, Line)
 %     - failure(Unit, Name, Line, How, Time)
 %       How is one of:
 %       - succeeded
 %       - Exception
+%       - time_limit_exceeded(Limit)
 %       - cmp_error(Cmp, E)
 %       - wrong_answer(Cmp)
 %       - failed
@@ -1040,15 +1114,6 @@ print_test_output(_, _, _).
 %     - success(Unit, Name, Line, Determinism, Time)
 %     - setup_failed(Unit, Name, Line)
 
-run_test_6(Unit, Name, Line, Options, _Body,
-	   blocked(Unit, Name, Line, Reason)) :-
-    option(blocked(Reason), Options),
-    !.
-run_test_6(Unit, Name, Line, Options, _Body, Result) :-
-    unit_module(Unit, Module),
-    \+ condition(Module, test(Unit,Name,Line), Options),
-    !,
-    Result = condition_failed(Unit, Name, Line).
 run_test_6(Unit, Name, Line, Options, Body, Result) :-
     option(setup(_Setup), Options),
     !,
@@ -1074,37 +1139,35 @@ run_test_7(Unit, Name, Line, Options, Body, Result) :-
     option(true(Cmp), Options),			   % expected success
     !,
     unit_module(Unit, Module),
-    call_time(reify(call_det(Module:Body, Det), Result0), Time),
+    call_time(reify_tmo(call_det(Module:Body, Det), Result0, Options), Time),
     (   Result0 == true
-    ->  (   catch(Module:Cmp, E, true)
-        ->  (  var(E)
-            ->  Result = success(Unit, Name, Line, Det, Time)
-            ;   Result = failure(Unit, Name, Line, cmp_error(Cmp, E), Time)
-            )
-        ;   Result = failure(Unit, Name, Line, wrong_answer(Cmp), Time)
-        )
+    ->  cmp_true(Cmp, Module, CmpResult),
+	(   CmpResult == []
+	->  Result = success(Unit, Name, Line, Det, Time)
+	;   Result = failure(Unit, Name, Line, CmpResult, Time)
+	)
     ;   Result0 == false
     ->  Result = failure(Unit, Name, Line, failed, Time)
     ;   Result0 = throw(E2)
-    ->  Result = failure(Unit, Name, Line, E2, Time)
+    ->  Result = failure(Unit, Name, Line, throw(E2), Time)
     ).
 run_test_7(Unit, Name, Line, Options, Body, Result) :-
     option(fail, Options),                         % expected failure
     !,
     unit_module(Unit, Module),
-    call_time(reify(Module:Body, Result0), Time),
+    call_time(reify_tmo(Module:Body, Result0, Options), Time),
     (   Result0 == true
     ->  Result = failure(Unit, Name, Line, succeeded, Time)
     ;   Result0 == false
     ->  Result = success(Unit, Name, Line, true, Time)
     ;   Result0 = throw(E)
-    ->  Result = failure(Unit, Name, Line, E, Time)
+    ->  Result = failure(Unit, Name, Line, throw(E), Time)
     ).
 run_test_7(Unit, Name, Line, Options, Body, Result) :-
     option(throws(Expect), Options),		   % Expected error
     !,
     unit_module(Unit, Module),
-    call_time(reify(Module:Body, Result0), Time),
+    call_time(reify_tmo(Module:Body, Result0, Options), Time),
     (   Result0 == true
     ->  Result = failure(Unit, Name, Line, no_exception, Time)
     ;   Result0 == false
@@ -1124,24 +1187,44 @@ run_test_7(Unit, Name, Line, Options, Body, Result) :-
     !,
     nondet_test(set(Answer), Unit, Name, Line, Options, Body, Result).
 
-
 %!  non_det_test(+Expected, +Unit, +Name, +Line, +Options, +Body, -Result)
 %
 %   Run tests on non-deterministic predicates.
 
-nondet_test(Expected, Unit, Name, Line, _Options, Body, Result) :-
+nondet_test(Expected, Unit, Name, Line, Options, Body, Result) :-
     unit_module(Unit, Module),
     result_vars(Expected, Vars),
-    (   call_time(reify(findall(Vars, Module:Body, Bindings), Result0), Time)
+    (   call_time(reify_tmo(findall(Vars, Module:Body, Bindings),
+                            Result0, Options), Time)
     ->  (   Result0 == true
         ->  (   nondet_compare(Expected, Bindings, Unit, Name, Line)
             ->  Result = success(Unit, Name, Line, true, Time)
-            ;   Result = failure(Unit, Name, Line, wrong_answer(Expected, Bindings), Time)
+            ;   Result = failure(Unit, Name, Line,
+				 [wrong_answer(Expected, Bindings)], Time)
             )
         ;   Result0 = throw(E)
-        ->  Result = failure(Unit, Name, Line, E, Time)
+        ->  Result = failure(Unit, Name, Line, throw(E), Time)
         )
     ).
+
+cmp_true([], _, L) =>
+    L = [].
+cmp_true([Cmp|T], Module, L) =>
+    E = error(Formal,_),
+    cmp_goal(Cmp, Goal),
+    (   catch(Module:Goal, E, true)
+    ->  (   var(Formal)
+	->  cmp_true(T, Module, L)
+	;   L = [cmp_error(Cmp,E)|L1],
+	    cmp_true(T, Module, L1)
+	)
+    ;   L = [wrong_answer(Cmp)|L1],
+	cmp_true(T, Module, L1)
+    ).
+
+cmp_goal(cmp(_Var, Expr), Goal) => Goal = Expr.
+cmp_goal(Expr, Goal) => Goal = Expr.
+
 
 %!  result_vars(+Expected, -Vars) is det.
 %
@@ -1193,7 +1276,7 @@ cmp(Var =@= Value, Var, variant, Value). % variant/2 is the same =@=
 %   True if Goal succeeded.  Det is unified to =true= if Goal left
 %   no choicepoints and =false= otherwise.
 
-:- if((swi|sicstus)).
+:- if((swi;sicstus)).
 call_det(Goal, Det) :-
     call_cleanup(Goal,Det0=true),
     ( var(Det0) -> Det = false ; Det = true ).
@@ -1224,13 +1307,13 @@ match_error(Expect, Rec) :-
 setup(Module, Context, Options) :-
     option(setup(Setup), Options),
     !,
-    (   catch(call_ex(Module, Setup), E, true)
-    ->  (   var(E)
-	->  true
-	;   print_message(error, plunit(error(setup, Context, E))),
-	    fail
-	)
-    ;   print_message(error, error(goal_failed(Setup), _)),
+    current_test_flag(test_options, GlobalOptions),
+    capture_output(reify(call_ex(Module, Setup), Result),
+		   Output, GlobalOptions),
+    (   Result == true
+    ->  true
+    ;   print_message(error,
+		      plunit(error(setup, Context, Output, Result))),
 	fail
     ).
 setup(_,_,_).
@@ -1242,13 +1325,16 @@ setup(_,_,_).
 condition(Module, Context, Options) :-
     option(condition(Cond), Options),
     !,
-    (   catch(call_ex(Module, Cond), E, true)
-    ->  (   var(E)
-	->  true
-	;   print_message(error, plunit(error(condition, Context, E))),
-	    fail
-	)
-    ;   fail
+    current_test_flag(test_options, GlobalOptions),
+    capture_output(reify(call_ex(Module, Cond), Result),
+		   Output, GlobalOptions),
+    (   Result == true
+    ->  true
+    ;   Result == false
+    ->  fail
+    ;   print_message(error,
+		      plunit(error(condition, Context, Output, Result))),
+	fail
     ).
 condition(_, _, _).
 
@@ -1259,7 +1345,7 @@ condition(_, _, _).
 
 call_ex(Module, Goal) :-
     Module:(expand_goal(Goal, GoalEx),
-		GoalEx).
+	    GoalEx).
 
 %!  cleanup(+Module, +Options) is det.
 %
@@ -1276,46 +1362,51 @@ cleanup(Module, Options) :-
     ;   print_message(warning, goal_failed(Cleanup, '(cleanup handler)'))
     ).
 
-success(Unit, Name, Line, Det, Time, Options) :-
+success(Unit, Name, Progress, Line, Det, Time, _Output, Options) :-
     memberchk(fixme(Reason), Options),
     !,
     (   (   Det == true
 	;   memberchk(nondet, Options)
 	)
-    ->  progress(Unit, Name, fixme(passed), Time),
+    ->  progress(Unit:Name, Progress, fixme(passed), Time),
 	Ok = passed
-    ;   progress(Unit, Name, fixme(nondet), Time),
+    ;   progress(Unit:Name, Progress, fixme(nondet), Time),
 	Ok = nondet
     ),
     flush_output(user_error),
     assert(fixme(Unit, Name, Line, Reason, Ok)).
-success(Unit, Name, Line, _, Time, Options) :-
+success(Unit, Name, Progress, Line, _, Time, Output, Options) :-
     failed_assertion(Unit, Name, Line, _,_,_,_),
     !,
-    failure(Unit, Name, Line, assertion, Time, Options).
-success(Unit, Name, Line, Det, Time, Options) :-
+    failure(Unit, Name, Progress, Line, assertion, Time, Output, Options).
+success(Unit, Name, Progress, Line, Det, Time, _Output, Options) :-
     assert(passed(Unit, Name, Line, Det, Time)),
     (   (   Det == true
 	;   memberchk(nondet, Options)
 	)
-    ->  progress(Unit, Name, passed, Time)
+    ->  progress(Unit:Name, Progress, passed, Time)
     ;   unit_file(Unit, File),
 	print_message(warning, plunit(nondet(File, Line, Name)))
     ).
 
-%!  failure(+Unit, +Name, +Line, +How, +Time, +Options) is det.
+%!  failure(+Unit, +Name, +Progress, +Line,
+%!          +How, +Time, +Output, +Options) is det.
 %
 %   Test failed.  Report the error.
 
-failure(Unit, Name, Line, _, Time, Options) :-
-    memberchk(fixme(Reason), Options),
-    !,
-    progress(Unit, Name, fixme(failed), Time),
-    assert(fixme(Unit, Name, Line, Reason, failed)).
-failure(Unit, Name, Line, E, Time, Options) :-
-    report_failure(Unit, Name, Line, E, Time, Options),
-    progress(Unit, Name, failed, Time),
-    assert_cyclic(failed(Unit, Name, Line, E, Time)).
+failure(Unit, Name, Progress, Line, _, Time, _Output, Options),
+  memberchk(fixme(Reason), Options) =>
+    assert(fixme(Unit, Name, Line, Reason, failed)),
+    progress(Unit:Name, Progress, fixme(failed), Time).
+failure(Unit, Name, Progress, Line, time_limit_exceeded(Limit), Time,
+	Output, Options) =>
+    assert_cyclic(timeout(Unit, Name, Line, Limit, Time)),
+    progress(Unit:Name, Progress, timeout(Limit), Time),
+    report_failure(Unit, Name, Progress, Line, timeout(Limit), Time, Output, Options).
+failure(Unit, Name, Progress, Line, E, Time, Output, Options) =>
+    assert_cyclic(failed(Unit, Name, Line, E, Time)),
+    progress(Unit:Name, Progress, failed, Time),
+    report_failure(Unit, Name, Progress, Line, E, Time, Output, Options).
 
 %!  assert_cyclic(+Term) is det.
 %
@@ -1346,31 +1437,140 @@ assert_cyclic(Term) :-
 
 
 		 /*******************************
+		 *             JOBS             *
+		 *******************************/
+
+:- if(current_prolog_flag(threads, true)).
+
+:- dynamic
+       job_data/2,		% Queue, Threads
+       scheduled_unit/1.
+
+schedule_unit(_:[]) :-
+    !.
+schedule_unit(UnitAndTests) :-
+    UnitAndTests = Unit:_Tests,
+    job_data(Queue, _),
+    !,
+    assertz(scheduled_unit(Unit)),
+    thread_send_message(Queue, unit(UnitAndTests)).
+schedule_unit(Unit) :-
+    run_unit(Unit).
+
+%!  setup_jobs(+Count) is det.
+%
+%   Setup threads for concurrent testing.
+
+setup_jobs(Count) :-
+    current_prolog_flag(cpu_count, Cores),
+    current_test_flag(test_options, Options),
+    option(concurrent(true), Options),
+    option(jobs(Jobs0), Options, Cores),
+    Jobs is min(Count, Jobs0),
+    Jobs > 1,
+    !,
+    message_queue_create(Q, [alias(plunit_jobs)]),
+    length(TIDs, Jobs),
+    foldl(create_plunit_job(Q), TIDs, 1, _),
+    asserta(job_data(Q, TIDs)),
+    job_feedback(informational, jobs(Jobs)).
+setup_jobs(_) :-
+    job_feedback(informational, jobs(1)).
+
+create_plunit_job(Q, TID, N, N1) :-
+    N1 is N + 1,
+    atom_concat(plunit_job_, N, Alias),
+    thread_create(plunit_job(Q), TID, [alias(Alias)]).
+
+plunit_job(Queue) :-
+    repeat,
+    (   catch(thread_get_message(Queue, Job,
+				 [ timeout(10)
+				 ]),
+	      error(_,_), fail)
+    ->  job(Job),
+	fail
+    ;   !
+    ).
+
+job(unit(Unit:Tests)) =>
+    run_unit(Unit:Tests).
+
+cleanup_jobs :-
+    retract(job_data(Queue, TIDSs)),
+    !,
+    message_queue_destroy(Queue),
+    maplist(thread_join, TIDSs).
+cleanup_jobs.
+
+%!  job_wait is det.
+%
+%   Wait for all test jobs to finish.
+
+job_wait :-
+    thread_wait(\+ scheduled_unit(_),
+		[ wait_preds([scheduled_unit/1]),
+		  timeout(1)
+		]),
+    !.
+job_wait :-
+    job_data(_Queue, TIDs),
+    member(TID, TIDs),
+    thread_property(TID, status(running)),
+    !,
+    job_wait.
+job_wait.
+
+
+
+job_info(begin(unit(_Unit))) =>
+    true.
+job_info(end(unit(Unit, _Summary))) =>
+    retractall(scheduled_unit(Unit)).
+
+:- else.			% No jobs
+
+schedule_unit(Unit) :-
+    run_unit(Unit).
+
+setup_jobs(_) :-
+    print_message(silent, plunit(jobs(1))).
+cleanup_jobs.
+job_wait.
+job_info(_).
+
+:- endif.
+
+
+
+		 /*******************************
 		 *            REPORTING         *
 		 *******************************/
 
-%!  begin_test(Unit, Test, Line, STO) is det.
-%!  end_test(Unit, Test, Line, STO) is det.
+%!  begin_test(+Unit, +Test, +Line, +Progress) is det.
+%!  end_test(+Unit, +Test, +Line, +Progress) is det.
 %
 %   Maintain running/5 and report a test has started/is ended using
 %   a =silent= message:
 %
-%       * plunit(begin(Unit:Test, File:Line, STO))
-%       * plunit(end(Unit:Test, File:Line, STO))
+%       * plunit(begin(Unit:Test, File:Line, Progress))
+%       * plunit(end(Unit:Test, File:Line, Progress))
 %
 %   @see message_hook/3 for intercepting these messages
 
-begin_test(Unit, Test, Line, STO) :-
+begin_test(Unit, Test, Line, Progress) :-
     thread_self(Me),
-    assert(running(Unit, Test, Line, STO, Me)),
+    assert(running(Unit, Test, Line, Progress, Me)),
     unit_file(Unit, File),
-    print_message(silent, plunit(begin(Unit:Test, File:Line, STO))).
+    test_count(Total),
+    job_feedback(information, begin(Unit:Test, File:Line, Progress/Total)).
 
-end_test(Unit, Test, Line, STO) :-
+end_test(Unit, Test, Line, Progress) :-
     thread_self(Me),
     retractall(running(_,_,_,_,Me)),
     unit_file(Unit, File),
-    print_message(silent, plunit(end(Unit:Test, File:Line, STO))).
+    test_count(Total),
+    job_feedback(information, end(Unit:Test, File:Line, Progress/Total)).
 
 %!  running_tests is det.
 %
@@ -1381,8 +1581,9 @@ running_tests :-
     print_message(informational, plunit(running(Running))).
 
 running_tests(Running) :-
-    findall(running(Unit:Test, File:Line, STO, Thread),
-	    (   running(Unit, Test, Line, STO, Thread),
+    test_count(Total),
+    findall(running(Unit:Test, File:Line, Progress/Total, Thread),
+	    (   running(Unit, Test, Line, Progress, Thread),
 		unit_file(Unit, File)
 	    ), Running).
 
@@ -1403,33 +1604,28 @@ current_test_unit(Unit, UnitOptions) :-
     current_unit(Unit, _Module, _Supers, UnitOptions).
 
 
-:- meta_predicate count(0, -).
 count(Goal, Count) :-
     aggregate_all(count, Goal, Count).
 
 %!  test_summary(?Unit, -Summary) is det.
 %
-%   True if there are no failures, otherwise false.
+%   True when Summary is a dict that reports the main statistics
+%   about the executed tests.
 
 test_summary(Unit, Summary) :-
     count(failed(Unit, _0Test, _0Line, _Reason, _0Time), Failed),
-    count(failed_assertion(Unit, _0Test, _0Line,
-			   _ALoc, _STO, _0Reason, _Goal), FailedAssertion),
-    count(sto(Unit, _0Test, _0Line, _Results), STO),
+    count(timeout(Unit, _0Test, _0Line, _Limit, _0Time), Timeout),
     count(passed(Unit, _0Test, _0Line, _Det, _0Time), Passed),
     count(blocked(Unit, _0Test, _0Line, _0Reason), Blocked),
-    Summary = plunit{passed:Passed,
+    test_count(Total),
+    Summary = plunit{total:Total,
+		     passed:Passed,
 		     failed:Failed,
-		     failed_assertions:FailedAssertion,
-		     blocked:Blocked,
-		     sto:STO}.
-
-all_tests_passed(Unit) :-
-    test_summary(Unit, Summary),
-    test_summary_passed(Summary).
+		     timeout:Timeout,
+		     blocked:Blocked}.
 
 test_summary_passed(Summary) :-
-    _{failed: 0, failed_assertions: 0, sto: 0} :< Summary.
+    _{failed: 0} :< Summary.
 
 %!  report is det.
 %
@@ -1440,55 +1636,38 @@ report :-
     print_message(silent, plunit(Summary)),
     _{ passed:Passed,
        failed:Failed,
-       failed_assertions:FailedAssertion,
-       blocked:Blocked,
-       sto:STO
+       timeout:Timeout,
+       blocked:Blocked
      } :< Summary,
-    (   Passed+Failed+FailedAssertion+Blocked+STO =:= 0
+    (   Passed+Failed+Timeout+Blocked =:= 0
     ->  info(plunit(no_tests))
-    ;   Failed+FailedAssertion+Blocked+STO =:= 0
+    ;   Failed+Timeout+Blocked =:= 0
     ->  report_fixme,
-	info(plunit(all_passed(Passed)))
-    ;   report_blocked,
+        test_count(Total),
+	info(plunit(all_passed(Total, Passed)))
+    ;   report_blocked(Blocked),
 	report_fixme,
-	report_failed_assertions,
-	report_failed,
-	report_sto,
+	report_failed(Failed),
+	report_timeout(Timeout),
 	info(plunit(passed(Passed)))
     ).
 
-number_of_clauses(F/A,N) :-
-    (   current_predicate(F/A)
-    ->  functor(G,F,A),
-	findall(t, G, Ts),
-	length(Ts, N)
-    ;   N = 0
-    ).
-
-report_blocked :-
-    number_of_clauses(blocked/4,N),
-    N > 0,
-    !,
-    info(plunit(blocked(N))),
+report_blocked(0) =>
+    true.
+report_blocked(Blocked) =>
+    info(plunit(blocked(Blocked))),
     (   blocked(Unit, Name, Line, Reason),
 	unit_file(Unit, File),
 	print_message(informational,
 		      plunit(blocked(File:Line, Name, Reason))),
 	fail ; true
     ).
-report_blocked.
 
-report_failed :-
-    number_of_clauses(failed/5, N),
-    info(plunit(failed(N))).
+report_failed(Failed) :-
+    print_message(error, plunit(failed(Failed))).
 
-report_failed_assertions :-
-    number_of_clauses(failed_assertion/7, N),
-    info(plunit(failed_assertions(N))).
-
-report_sto :-
-    number_of_clauses(sto/4, N),
-    info(plunit(sto(N))).
+report_timeout(Count) :-
+    print_message(warning, plunit(timeout(Count))).
 
 report_fixme :-
     report_fixme(_,_,_).
@@ -1505,12 +1684,11 @@ fixme(How, Tuples, Count) :-
 	    fixme(Unit, Name, Line, Reason, How), Tuples),
     length(Tuples, Count).
 
-
-report_failure(Unit, Name, _, assertion, Time, _) :-
-    !,
-    progress(Unit, Name, assertion, Time).
-report_failure(Unit, Name, Line, Error, _Time, _Options) :-
-    print_message(error, plunit(failed(Unit, Name, Line, Error))).
+report_failure(Unit, Name, Progress, Line, Error,
+	       Time, Output, _Options) =>
+    test_count(Total),
+    job_feedback(error, failed(Unit:Name, Progress/Total, Line,
+			       Error, Time, Output)).
 
 
 %!  test_report(+What) is det.
@@ -1531,19 +1709,13 @@ test_report(What) :-
 		 *             INFO             *
 		 *******************************/
 
-%!  current_test_set(?Unit) is nondet.
-%
-%   True if Unit is a currently loaded test-set.
-
-current_test_set(Unit) :-
-    current_unit(Unit, _Module, _Context, _Options).
-
 %!  unit_file(+Unit, -File) is det.
 %!  unit_file(-Unit, +File) is nondet.
 
 unit_file(Unit, File) :-
     current_unit(Unit, Module, _Context, _Options),
-    current_module(Module, File).
+    current_module(Module, File),
+    !.
 unit_file(Unit, PlFile) :-
     nonvar(PlFile),
     test_file_for(TestFile, PlFile),
@@ -1584,17 +1756,53 @@ load_test_files(_Options) :-
 
 %!  info(+Term)
 %
-%   Runs print_message(Level, Term), where Level  is one of =silent=
-%   or =informational= (default).
+%   Runs print_message(Level, Term), where Level is   one of `silent` or
+%   `informational` (default).
 
 info(Term) :-
     message_level(Level),
     print_message(Level, Term).
 
-progress(Unit, Name, Result, Time) :-
-    flag(plunit_test, N, N+1),
+%!  progress(+UnitTest, +Progress, +Result, +Time) is det.
+%
+%   Test Unit:Name completed in Time. Result is the result and is one of
+%
+%     - passed
+%     - failed
+%     - assertion
+%     - nondet
+%     - fixme(passed)
+%     - fixme(nondet)
+%     - fixme(failed)
+%     - forall(end, Nth, FTotal)
+%       Pseudo result for completion of a forall(Gen,Test) set.  Mapped
+%       to forall(FTotal, FFailed)
+
+progress(UnitTest, _Progress, forall(end, Nth, FTotal), Time) =>
+    (   retract(forall_failures(Nth, FFailed))
+    ->  true
+    ;   FFailed = 0
+    ),
     test_count(Total),
-    print_message(information, plunit(progress(Unit, Name, Result, N/Total, Time))).
+    job_feedback(information, progress(UnitTest, forall(FTotal,FFailed), Nth/Total, Time)).
+progress(UnitTest, Progress, Result, Time), Progress = forall(_Vars, Nth-_I) =>
+    with_mutex(plunit_forall_counter,
+               update_forall_failures(Nth, Result)),
+    test_count(Total),
+    job_feedback(information, progress(UnitTest, Result, Progress/Total, Time)).
+progress(UnitTest, Progress, Result, Time) =>
+    test_count(Total),
+    job_feedback(information, progress(UnitTest, Result, Progress/Total, Time)).
+
+update_forall_failures(_Nth, passed) =>
+    true.
+update_forall_failures(Nth, _) =>
+    (   retract(forall_failures(Nth, Failed0))
+    ->  true
+    ;   Failed0 = 0
+    ),
+    Failed is Failed0+1,
+    asserta(forall_failures(Nth, Failed)).
 
 message_level(Level) :-
     current_test_flag(test_options, Options),
@@ -1630,26 +1838,27 @@ message(plunit(nondet(File, Line, Name))) -->
     [ 'PL-Unit: Test ~w: Test succeeded with choicepoint'- [Name] ].
 message(error(plunit(incompatible_options, Tests), _)) -->
     [ 'PL-Unit: incompatible test-options: ~p'-[Tests] ].
+message(plunit(sto(true))) -->
+    [ 'Option sto(true) is ignored.  See `occurs_check` option.'-[] ].
 
 					% Unit start/end
-:- if(swi).
-message(plunit(progress(_Unit, _Name, Result, _N_T, _Time))) -->
-    [ at_same_line ], result(Result), [flush].
+message(plunit(jobs(1))) -->
+    !.
+message(plunit(jobs(N))) -->
+    [ 'Tesing with ~D parallel jobs'-[N] ].
+message(plunit(begin(_Unit))) -->
+    { tty_feedback },
+    !.
 message(plunit(begin(Unit))) -->
-    [ 'PL-Unit: ~w '-[Unit], flush ].
-message(plunit(end(_Unit, Summary))) -->
-    [ at_same_line ],
-    (   {test_summary_passed(Summary)}
-    ->  [ ' passed' ]
-    ;   [ ansi(error, '**FAILED', []) ]
-    ),
-    [ ' ~3f sec'-[Summary.time.cpu] ].
-:- else.
-message(plunit(begin(Unit))) -->
-    [ 'PL-Unit: ~w '-[Unit]/*, flush-[]*/ ].
+    [ 'Start unit: ~w~n'-[Unit], flush ].
 message(plunit(end(_Unit, _Summary))) -->
-    [ ' done'-[] ].
-:- endif.
+    { tty_feedback },
+    !.
+message(plunit(end(Unit, Summary))) -->
+    (   {test_summary_passed(Summary)}
+    ->  [ 'End unit ~w: passed (~3f sec CPU)'-[Unit, Summary.time.cpu] ]
+    ;   [ ansi(error, 'End unit ~w: **FAILED (~3f sec CPU)', [Unit, Summary.time.cpu]) ]
+    ).
 message(plunit(blocked(unit(Unit, Reason)))) -->
     [ 'PL-Unit: ~w blocked: ~w'-[Unit, Reason] ].
 message(plunit(running([]))) -->
@@ -1676,19 +1885,23 @@ message(plunit(blocked(N))) -->
     [ '~D tests are blocked:'-[N] ].
 message(plunit(blocked(Pos, Name, Reason))) -->
     locationprefix(Pos),
-    test_name(Name),
+    test_name(Name, -),
     [ ': ~w'-[Reason] ].
 
 					% fail/success
 message(plunit(no_tests)) -->
     !,
     [ 'No tests to run' ].
-message(plunit(all_passed(1))) -->
+message(plunit(all_passed(1, 1))) -->
     !,
     [ 'test passed' ].
-message(plunit(all_passed(Count))) -->
+message(plunit(all_passed(Total, Total))) -->
     !,
-    [ 'All ~D tests passed'-[Count] ].
+    [ 'All ~D tests passed'-[Total] ].
+message(plunit(all_passed(Total, Count))) -->
+    !,
+    { SubTests is Count-Total },
+    [ 'All ~D (+~D sub-tests) tests passed'-[Total, SubTests] ].
 message(plunit(passed(Count))) -->
     !,
     [ '~D tests passed'-[Count] ].
@@ -1700,19 +1913,11 @@ message(plunit(failed(1))) -->
     [ '1 test failed'-[] ].
 message(plunit(failed(N))) -->
     [ '~D tests failed'-[N] ].
-message(plunit(failed_assertions(0))) -->
+message(plunit(timeout(0))) -->
     !,
     [].
-message(plunit(failed_assertions(1))) -->
-    !,
-    [ '1 assertion failed'-[] ].
-message(plunit(failed_assertions(N))) -->
-    [ '~D assertions failed'-[N] ].
-message(plunit(sto(0))) -->
-    !,
-    [].
-message(plunit(sto(N))) -->
-    [ '~D test results depend on unification mode'-[N] ].
+message(plunit(timeout(N))) -->
+    [ '~D tests timed out'-[N] ].
 message(plunit(fixme(0,0,0))) -->
     [].
 message(plunit(fixme(Failed,0,0))) -->
@@ -1724,18 +1929,68 @@ message(plunit(fixme(Failed,Passed,Nondet))) -->
     { TotalPassed is Passed+Nondet },
     [ 'FIXME: ~D failed; ~D passed; (~D nondet)'-
       [Failed, TotalPassed, Nondet] ].
-message(plunit(failed(Unit, Name, Line, Failure))) -->
+
+message(plunit(begin(Unit:Test, _Location, Progress))) -->
+    { tty_columns(SummaryWidth, _Margin),
+      test_name_summary(Test, SummaryWidth, NameS),
+      progress_string(Progress, ProgressS)
+    },
+    (   { tty_feedback,
+	  tty_clear_to_eol(CE)
+	}
+    ->  [ at_same_line, '\r[~w] ~w:~w ..~w'-[ProgressS, Unit, NameS,
+					     CE], flush ]
+    ;   { jobs(_) }
+    ->  [ '[~w] ~w:~w ..'-[ProgressS, Unit, NameS] ]
+    ;   [ '[~w] ~w:~w ..'-[ProgressS, Unit, NameS], flush ]
+    ).
+message(plunit(end(_UnitTest, _Location, _Progress))) -->
+    [].
+message(plunit(progress(_UnitTest, Status, _Progress, _Time))) -->
+    { Status = forall(_,_)
+    ; Status == assertion
+    },
+    !.
+message(plunit(progress(Unit:Test, Status, Progress, Time))) -->
+    { jobs(_),
+      !,
+      tty_columns(SummaryWidth, Margin),
+      test_name_summary(Test, SummaryWidth, NameS),
+      progress_string(Progress, ProgressS),
+      progress_tag(Status, Tag, _Keep, Style)
+    },
+    [ ansi(Style, '[~w] ~w:~w ~`.t ~w (~3f sec)~*|',
+	   [ProgressS, Unit, NameS, Tag, Time.wall, Margin]) ].
+message(plunit(progress(_UnitTest, Status, _Progress, Time))) -->
+    { tty_columns(_SummaryWidth, Margin),
+      progress_tag(Status, Tag, _Keep, Style)
+    },
+    [ at_same_line, ansi(Style, '~`.t ~w (~3f sec)~*|',
+			 [Tag, Time.wall, Margin]) ],
+    (   { tty_feedback }
+    ->  [flush]
+    ;   []
+    ).
+message(plunit(failed(Unit:Test, Progress, Line, Failure, _Time, Output))) -->
     { unit_file(Unit, File) },
     locationprefix(File:Line),
-    test_name(Name),
+    test_name(Test, Progress),
     [': '-[] ],
-    failure(Failure).
-:- if(swi).
-message(plunit(failed_assertion(Unit, Name, Line, AssertLoc,
-				_STO, Reason, Goal))) -->
+    failure(Failure),
+    test_output(Output).
+message(plunit(timeout(Unit:Test, Progress, Line, Limit, Output))) -->
     { unit_file(Unit, File) },
     locationprefix(File:Line),
-    test_name(Name),
+    test_name(Test, Progress),
+    [': '-[] ],
+    timeout(Limit),
+    test_output(Output).
+:- if(swi).
+message(plunit(failed_assertion(Unit:Test, Line, AssertLoc,
+				Progress, Reason, Goal))) -->
+    { unit_file(Unit, File) },
+    locationprefix(File:Line),
+    test_name(Test, Progress),
     [ ': assertion'-[] ],
     assertion_location(AssertLoc, File),
     assertion_reason(Reason), ['\n\t'],
@@ -1774,30 +2029,23 @@ unqualify(M:Goal, _, Goal) :-
     !.
 unqualify(Goal, _, Goal).
 
-result(passed)        --> ['.'-[]].
-result(nondet)        --> ['+'-[]].
-result(fixme(passed)) --> ['*'-[]].
-result(fixme(failed)) --> ['!'-[]].
-result(failed)        --> ['-'-[]].
-result(assertion)     --> ['A'-[]].
+test_output("") --> [].
+test_output(Output) -->
+    [ ansi(code, '~s', [Output]) ].
 
 :- endif.
 					% Setup/condition errors
-message(plunit(error(Where, Context, Exception))) -->
+message(plunit(error(Where, Context, _Output, throw(Exception)))) -->
     locationprefix(Context),
     { message_to_string(Exception, String) },
     [ 'error in ~w: ~w'-[Where, String] ].
+message(plunit(error(Where, Context, _Output, false))) -->
+    locationprefix(Context),
+    [ 'setup failed in ~w'-[Where] ].
 
-					% STO messages
-message(plunit(sto(Unit, Name, Line))) -->
-    { unit_file(Unit, File) },
-    locationprefix(File:Line),
-    test_name(Name),
-    [' is subject to occurs check (STO): '-[] ].
-message(plunit(sto(Type, Result))) -->
-    sto_type(Type),
-    sto_result(Result).
-
+                                        % delayed output
+message(plunit(test_output(_, Output))) -->
+    [ '~s'-[Output] ].
 					% Interrupts (SWI)
 :- if(swi).
 message(interrupt(begin)) -->
@@ -1814,35 +2062,21 @@ message(interrupt(begin)) -->
     '$messages':prolog_message(interrupt(begin)).
 :- endif.
 
-test_name(@(Name,Bindings)) -->
+test_name(Name, forall(Bindings, _Nth-I)) -->
     !,
-    [ 'test ~w (forall bindings = ~p)'-[Name, Bindings] ].
-test_name(Name) -->
+    [ 'test ~w (~d-th forall bindings = ~p)'-[Name, I, Bindings] ].
+test_name(Name, _) -->
     !,
     [ 'test ~w'-[Name] ].
-
-sto_type(sto_error_incomplete) -->
-    [ 'Finite trees (error checking): ' ].
-sto_type(rational_trees) -->
-    [ 'Rational trees: ' ].
-sto_type(finite_trees) -->
-    [ 'Finite trees: ' ].
-
-sto_result(success(_Unit, _Name, _Line, Det, Time)) -->
-    det(Det),
-    [ ' success in ~3f seconds'-[Time.cpu] ].
-sto_result(failure(_Unit, _Name, _Line, How, _Time)) -->
-    failure(How).
 
 det(true) -->
     [ 'deterministic' ].
 det(false) -->
     [ 'non-deterministic' ].
 
-running(running(Unit:Test, File:Line, STO, Thread)) -->
+running(running(Unit:Test, File:Line, Thread)) -->
     thread(Thread),
-    [ '~q:~q at '-[Unit, Test], url(File:Line) ],
-    current_sto(STO).
+    [ '~q:~q at '-[Unit, Test], url(File:Line) ].
 running([H|T]) -->
     ['\t'], running(H),
     (   {T == []}
@@ -1854,16 +2088,9 @@ thread(main) --> !.
 thread(Other) -->
     [' [~w] '-[Other] ].
 
-current_sto(sto_error_incomplete) -->
-    [ ' (STO: error checking)' ].
-current_sto(rational_trees) -->
-    [].
-current_sto(finite_trees) -->
-    [ ' (STO: occurs check enabled)' ].
-
 :- if(swi).
 write_term(T, OPS) -->
-    ['~@'-[write_term(T,OPS)]].
+    ['~W'-[T,OPS] ].
 :- else.
 write_term(T, _OPS) -->
     ['~q'-[T]].
@@ -1871,12 +2098,17 @@ write_term(T, _OPS) -->
 
 expected_got_ops_(Ex, E, OPS, Goals) -->
     ['    Expected: '-[]], write_term(Ex, OPS), [nl],
-    ['    Got:      '-[]], write_term(E,  OPS), [nl],
+    ['    Got:      '-[]], write_term(E,  OPS), [],
     ( { Goals = [] } -> []
-    ; ['       with: '-[]], write_term(Goals, OPS), [nl]
+    ; [nl, '       with: '-[]], write_term(Goals, OPS), []
     ).
 
 
+failure(List) -->
+    { is_list(List) },
+    !,
+    [ nl ],
+    failures(List).
 failure(Var) -->
     { var(Var) },
     !,
@@ -1892,6 +2124,16 @@ failure(wrong_error(Expected, Error)) -->
     },
     [ 'wrong error'-[], nl ],
     expected_got_ops_(Ex, E, OPS, Goals).
+failure(wrong_answer(cmp(Var, Cmp))) -->
+    { Cmp =.. [Op,Answer,Expected],
+      !,
+      copy_term(Expected-Answer, Ex-A, Goals),
+      numbervars(Ex-A-Goals, 0, _),
+      write_options(OPS)
+    },
+    [ 'wrong answer for ', ansi(code, '~w', [Var]),
+      ' (compared using ~w)'-[Op], nl ],
+    expected_got_ops_(Ex, A, OPS, Goals).
 failure(wrong_answer(Cmp)) -->
     { Cmp =.. [Op,Answer,Expected],
       !,
@@ -1920,7 +2162,7 @@ failure(wrong_answer(CmpExpected, Bindings)) -->
 failure(cmp_error(_Cmp, Error)) -->
     { message_to_string(Error, Message) },
     [ 'Comparison error: ~w'-[Message] ].
-failure(Error) -->
+failure(throw(Error)) -->
     { Error = error(_,_),
       !,
       message_to_string(Error, Message)
@@ -1929,6 +2171,16 @@ failure(Error) -->
 :- endif.
 failure(Why) -->
     [ '~p'-[Why] ].
+
+failures([]) -->
+    !.
+failures([H|T]) -->
+    !,
+    failure(H), [nl],
+    failures(T).
+
+timeout(Limit) -->
+    [ 'Timeout exceeeded (~2f sec)'-[Limit] ].
 
 fixme_message([]) --> [].
 fixme_message([fixme(Unit, _Name, Line, Reason, How)|T]) -->
@@ -1954,6 +2206,261 @@ write_options([ numbervars(true),
 		max_depth(100),
 		attributes(portray)
 	      ]).
+
+%!  test_name_summary(+Term, +MaxLen, -Summary) is det.
+%
+%   Given the test id, generate  string that summarizes this in MaxLen
+%   characters.
+
+test_name_summary(Term, MaxLen, Summary) :-
+    summary_string(Term, Text),
+    atom_length(Text, Len),
+    (   Len =< MaxLen
+    ->  Summary = Text
+    ;   Pre is MaxLen - 8,
+        sub_string(Text, 0, Pre, _, PreText),
+        sub_string(Text, _, 5, 0, PostText),
+        format(string(Summary), '~w...~w', [PreText,PostText])
+    ).
+
+summary_string(@(Name,Vars), String) =>
+    format(string(String), '~W (using ~W)',
+           [ Name, [numbervars(true), quoted(false)],
+             Vars, [numbervars(true), portray(true), quoted(true)]
+           ]).
+summary_string(Name, String) =>
+    term_string(Name, String, [numbervars(true), quoted(false)]).
+
+%!  progress_string(+Progress, -S) is det.
+%
+%   True when S is a string representation for the test progress.
+
+progress_string(forall(_Vars, N-I)/Total, S) =>
+    format(string(S), '~w-~w/~w', [N,I,Total]).
+progress_string(Progress, S) =>
+    term_string(Progress, S).
+
+%!  progress_tag(+Status, -Tag, -Keep, -Style) is det.
+%
+%   Given a progress status, determine the status tag, whether we must
+%   preserve the  line and the Style  we must use to  print the status
+%   line.
+
+progress_tag(passed,        Tag, Keep, Style) =>
+    Tag = passed, Keep = false, Style = comment.
+progress_tag(fixme(passed), Tag, Keep, Style) =>
+    Tag = passed, Keep = false, Style = comment.
+progress_tag(fixme(_),      Tag, Keep, Style) =>
+    Tag = fixme, Keep = true, Style = warning.
+progress_tag(nondet,        Tag, Keep, Style) =>
+    Tag = '**NONDET', Keep = true, Style = warning.
+progress_tag(timeout(_Limit), Tag, Keep, Style) =>
+    Tag = '**TIMEOUT', Keep = true, Style = warning.
+progress_tag(assertion,     Tag, Keep, Style) =>
+    Tag = '**FAILED', Keep = true, Style = error.
+progress_tag(failed,        Tag, Keep, Style) =>
+    Tag = '**FAILED', Keep = true, Style = error.
+progress_tag(forall(_,0),   Tag, Keep, Style) =>
+    Tag = passed, Keep = false, Style = comment.
+progress_tag(forall(_,_),   Tag, Keep, Style) =>
+    Tag = '**FAILED', Keep = true, Style = error.
+
+
+		 /*******************************
+		 *      CONCURRENT STATUS       *
+		 *******************************/
+
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+This part deals with interactive feedback when we are running multiple
+ threads.   The terminal  window  cannot  work on  top  of the  Prolog
+ message  infrastructure and  (thus)  we have  to  use more  low-level
+ means.
+
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+:- dynamic
+       jobs/1,			% Count
+       job_window/1,		% Count
+       job_status_line/3.	% Job, Format, Args
+
+job_feedback(_, jobs(Jobs)) :-
+    retractall(jobs(_)),
+    Jobs > 1,
+    asserta(jobs(Jobs)),
+    tty_feedback,
+    !,
+    retractall(job_window(_)),
+    asserta(job_window(Jobs)),
+    retractall(job_status_line(_,_,_)),
+    jobs_redraw.
+job_feedback(_, jobs(Jobs)) :-
+    !,
+    retractall(job_window(_)),
+    info(plunit(jobs(Jobs))).
+job_feedback(_, Msg) :-
+    job_window(_),
+    !,
+    with_mutex(plunit_feedback, job_feedback(Msg)).
+job_feedback(Level, Msg) :-
+    print_message(Level, plunit(Msg)).
+
+job_feedback(begin(Unit:Test, _Location, Progress)) =>
+    tty_columns(SummaryWidth, _Margin),
+    test_name_summary(Test, SummaryWidth, NameS),
+    progress_string(Progress, ProgressS),
+    tty_clear_to_eol(CE),
+    job_format(comment, '\r[~w] ~w:~w ..~w',
+	       [ProgressS, Unit, NameS, CE]),
+    flush_output.
+job_feedback(end(_UnitTest, _Location, _Progress)) =>
+    true.
+job_feedback(progress(_UnitTest, Status, _Progress, Time)) =>
+    (   hide_progress(Status)
+    ->  true
+    ;   tty_columns(_SummaryWidth, Margin),
+	progress_tag(Status, Tag, _Keep, Style),
+	job_finish(Style, '~`.t ~w (~3f sec)~*|',
+		   [Tag, Time.wall, Margin])
+    ).
+job_feedback(failed(UnitTest, Progress, Line, Error, Time, Output)) =>
+    tty_columns(_SummaryWidth, Margin),
+    progress_tag(failed, Tag, _Keep, Style),
+    job_finish(Style, '~`.t ~w (~3f sec)~*|',
+	       [Tag, Time.wall, Margin]),
+    print_test_output(Error, Output),
+    (   (   Error = timeout(_)	% Status line suffices
+	;   Error == assertion	% We will get an failed test later
+	)
+    ->  true
+    ;   print_message(Style, plunit(failed(UnitTest, Progress, Line,
+					   Error, Time, "")))
+    ),
+    jobs_redraw.
+job_feedback(begin(_Unit)) => true.
+job_feedback(end(_Unit, _Summary)) => true.
+
+hide_progress(assertion).
+hide_progress(forall(_,_)).
+hide_progress(failed).
+hide_progress(timeout(_)).
+
+print_test_output(_, "") => true.
+print_test_output(assertion, Output) =>
+    print_message(debug, plunit(test_output(error, Output))).
+print_test_output(_, Output) =>
+    print_message(debug, plunit(test_output(informational, Output))).
+
+%!  jobs_redraw is det.
+%
+%   Redraw the job window.
+
+jobs_redraw :-
+    job_window(N),
+    !,
+    tty_columns(_, Width),
+    tty_header_line(Width),
+    forall(between(1,N,Line), job_redraw_worker(Line)),
+    tty_header_line(Width).
+jobs_redraw.
+
+job_redraw_worker(Line) :-
+    (   job_status_line(Line, Fmt, Args)
+    ->  ansi_format(comment, Fmt, Args)
+    ;   true
+    ),
+    nl.
+
+%!  job_format(+Style, +Fmt, +Args) is det.
+%!  job_format(+Job, +Style, +Fmt, +Args, +Save) is det.
+%
+%   Point should be  below the status window.  Format  Fmt+Args in the
+%   line Job using Style and return to the position below the window.
+
+job_format(Style, Fmt, Args) :-
+    job_self(Job),
+    job_format(Job, Style, Fmt, Args, true).
+
+%!  job_finish(+Style, +Fmt, +Args) is det.
+%!  job_finish(+Job, +Style, +Fmt, +Args) is det.
+%
+%   Complete  the status  line  for Job.   This  redraws the  original
+%   status line when we are using a job window.
+
+job_finish(Style, Fmt, Args) :-
+    job_self(Job),
+    job_finish(Job, Style, Fmt, Args).
+
+:- det(job_finish/4).
+job_finish(Job, Style, Fmt, Args) :-
+    retract(job_status_line(Job, Fmt0, Args0)),
+    !,
+    string_concat(Fmt0, Fmt, Fmt1),
+    append(Args0, Args, Args1),
+    job_format(Job, Style, Fmt1, Args1, false).
+
+:- det(job_format/5).
+job_format(Job, Style, Fmt, Args, Save) :-
+    job_window(Jobs),
+    Up is Jobs+2-Job,
+    flush_output(user_output),
+    tty_up_and_clear(Up),
+    ansi_format(Style, Fmt, Args),
+    (   Save == true
+    ->  retractall(job_status_line(Job, _, _)),
+	asserta(job_status_line(Job, Fmt, Args))
+    ;   true
+    ),
+    tty_down_and_home(Up),
+    flush_output(user_output).
+
+:- det(job_self/1).
+job_self(Job) :-
+    job_window(N),
+    N > 1,
+    thread_self(Me),
+    split_string(Me, '_', '', [_,_,S]),
+    number_string(Job, S).
+
+%!  feedback is semidet.
+%
+%   provide feedback using the `tty`  format, which reuses the current
+%   output line if the test is successful.
+
+tty_feedback :-
+    has_tty,
+    current_test_flag(test_options, Options),
+    option(format(tty), Options, tty).
+
+has_tty :-
+    stream_property(user_output, tty(true)).
+
+tty_columns(SummaryWidth, Margin) :-
+    tty_width(W),
+    Margin is W-8,
+    SummaryWidth = max(20,Margin-50).
+
+tty_width(W) :-
+    current_predicate(tty_size/2),
+    catch(tty_size(_Rows, Cols), error(_,_), fail),
+    !,
+    W = Cols.
+tty_width(80).
+
+tty_header_line(Width) :-
+    ansi_format(comment, '~N~`\u2015t~*|~n', [Width]).
+
+tty_clear_to_eol(S) :-
+    tty_get_capability(ce, string, S),
+    !.
+tty_clear_to_eol('\e[K').
+
+tty_up_and_clear(Lines) :-
+    format(user_output, '\e[~dA\r\e[K', [Lines]).
+
+tty_down_and_home(Lines) :-
+    format(user_output, '\e[~dB\r', [Lines]).
 
 :- if(swi).
 
