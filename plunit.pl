@@ -80,9 +80,6 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 		 *    CONDITIONAL COMPILATION   *
 		 *******************************/
 
-:- discontiguous
-    user:term_expansion/2.
-
 swi     :- catch(current_prolog_flag(dialect, swi), _, fail), !.
 swi     :- catch(current_prolog_flag(dialect, yap), _, fail).
 sicstus :- catch(current_prolog_flag(system_type, _), _, fail).
@@ -149,6 +146,9 @@ set_test_flag( Name, Val ) :-
     asserta(test_flag(Name, Val)).
 
 :- op(1150, fx, thread_local).
+
+:- discontiguous
+    user:term_expansion/2.
 
 user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
     prolog_load_context(module, plunit).
@@ -516,10 +516,8 @@ expand(test(Name, _Options), _) :-
     !,
     throw_error(existence_error(body, test(Name)), _).
 
-:- if(swi).
 :- multifile
     system:term_expansion/2.
-:- endif.
 
 system:term_expansion(Term, Expanded) :-
     (   loading_unit(_, _, File, _)
@@ -535,27 +533,6 @@ system:term_expansion(Term, Expanded) :-
 		 /*******************************
 		 *             OPTIONS          *
 		 *******************************/
-
-:- if(swi).
-:- else.
-must_be(list, X) :-
-    !,
-    (   is_list(X)
-    ->  true
-    ;   is_not(list, X)
-    ).
-must_be(Type, X) :-
-    (   call(Type, X)
-    ->  true
-    ;   is_not(Type, X)
-    ).
-
-is_not(Type, X) :-
-    (   ground(X)
-    ->  throw_error(type_error(Type, X), _)
-    ;   throw_error(instantiation_error, _)
-    ).
-:- endif.
 
 %!  valid_options(:Pred, +Options) is det.
 %
