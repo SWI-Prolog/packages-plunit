@@ -2428,9 +2428,11 @@ tty_width(80).
 tty_header_line(Width) :-
     ansi_format(comment, '~N~`\u2015t~*|~n', [Width]).
 
+:- if(current_predicate(tty_get_capability/3)).
 tty_clear_to_eol(S) :-
     tty_get_capability(ce, string, S),
     !.
+:- endif.
 tty_clear_to_eol('\e[K').
 
 tty_up_and_clear(Lines) :-
