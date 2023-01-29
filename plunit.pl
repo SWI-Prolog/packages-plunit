@@ -716,32 +716,33 @@ run_tests_sync(Units, Options) :-
 	setup_jobs(Count),
 	setup_call_cleanup(
 	    setup_trap_assertions(Ref),
-	    run_units_and_check_errors(Units, Options),
-	    report_and_cleanup(Ref, Options)),
+	    call_time(run_units(Units, Options), Time),
+	    report_and_cleanup(Ref, Time, Options)),
 	cleanup_jobs).
 
-%!  report_and_cleanup(+Ref, +Options)
+%!  report_and_cleanup(+Ref, +Time, +Options)
 %
 %   Undo changes to the environment   (trapping  assertions), report the
 %   results and cleanup.
 
-report_and_cleanup(Ref, _Options) :-
+report_and_cleanup(Ref, Time, Options) :-
     cleanup_trap_assertions(Ref),
-    report,
-    cleanup_after_test.
+    test_summary(_All, Summary),
+    report(Time, Options),
+    cleanup_after_test,
+    (   option(summary(Summary), Options)
+    ->  true
+    ;   test_summary_passed(Summary) % fail if some test failed
+    ).
+
 
 %!  run_units_and_check_errors(+Units, +Options) is semidet.
 %
 %   Run all test units and succeed if all tests passed.
 
-run_units_and_check_errors(Units, Options) :-
+run_units(Units, _Options) :-
     maplist(schedule_unit, Units),
-    job_wait,
-    test_summary(_All, Summary),
-    (   option(summary(Summary), Options)
-    ->  true
-    ;   test_summary_passed(Summary)
-    ).
+    job_wait.
 
 %!  runnable_tests(+Spec, -Plan) is det.
 %
@@ -1604,11 +1605,11 @@ test_summary(Unit, Summary) :-
 test_summary_passed(Summary) :-
     _{failed: 0} :< Summary.
 
-%!  report is det.
+%!  report(+Time, +Options) is det.
 %
 %   Print a summary of the tests that ran.
 
-report :-
+report(Time, _Options) :-
     test_summary(_, Summary),
     print_message(silent, plunit(Summary)),
     _{ passed:Passed,
@@ -1621,12 +1622,13 @@ report :-
     ;   Failed+Timeout+Blocked =:= 0
     ->  report_fixme,
         test_count(Total),
-	info(plunit(all_passed(Total, Passed)))
+	info(plunit(all_passed(Total, Passed, Time)))
     ;   report_blocked(Blocked),
 	report_fixme,
 	report_failed(Failed),
 	report_timeout(Timeout),
-	info(plunit(passed(Passed)))
+	info(plunit(passed(Passed))),
+        info(plunit(total_time(Time)))
     ).
 
 report_blocked(0) =>
@@ -1853,6 +1855,8 @@ message(plunit(fixme([]))) --> !.
 message(plunit(fixme(Tuples))) -->
     !,
     fixme_message(Tuples).
+message(plunit(total_time(Time))) -->
+    [ 'Total time: ~3f seconds'-[Time.wall] ].
 
 					% Blocked tests
 message(plunit(blocked(1))) -->
@@ -1869,16 +1873,17 @@ message(plunit(blocked(Pos, Name, Reason))) -->
 message(plunit(no_tests)) -->
     !,
     [ 'No tests to run' ].
-message(plunit(all_passed(1, 1))) -->
+message(plunit(all_passed(1, 1, _))) -->
     !,
     [ 'test passed' ].
-message(plunit(all_passed(Total, Total))) -->
+message(plunit(all_passed(Total, Total, Time))) -->
     !,
-    [ 'All ~D tests passed'-[Total] ].
-message(plunit(all_passed(Total, Count))) -->
+    [ 'All ~D tests passed in ~3f seconds'-[Total, Time.wall] ].
+message(plunit(all_passed(Total, Count, Time))) -->
     !,
     { SubTests is Count-Total },
-    [ 'All ~D (+~D sub-tests) tests passed'-[Total, SubTests] ].
+    [ 'All ~D (+~D sub-tests) tests passed in ~3f seconds'-
+      [Total, SubTests, Time.wall] ].
 message(plunit(passed(Count))) -->
     !,
     [ '~D tests passed'-[Count] ].
