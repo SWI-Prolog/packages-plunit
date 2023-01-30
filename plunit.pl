@@ -1711,25 +1711,35 @@ unit_file(Unit, PlFile) :-
 
 %!  load_test_files(+Options) is det.
 %
-%   Load .plt test-files related to loaded source-files.
+%   Load .plt test-files related  to   loaded  source-files.  Options is
+%   currently ignored.
 
 load_test_files(_Options) :-
+    State = state(0,0),
     (   source_file(File),
 	file_name_extension(Base, Old, File),
 	Old \== plt,
 	file_name_extension(Base, plt, TestFile),
 	exists_file(TestFile),
+        inc_arg(1, State),
 	(   test_file_for(TestFile, File)
 	->  true
 	;   load_files(TestFile,
 		       [ if(changed),
 			 imports([])
 		       ]),
+            inc_arg(2, State),
 	    asserta(test_file_for(TestFile, File))
 	),
-	fail ; true
+        fail
+    ;   State = state(Total, Loaded),
+        print_message(informational, plunit(test_files(Total, Loaded)))
     ).
 
+inc_arg(Arg, State) :-
+    arg(Arg, State, N0),
+    N is N0+1,
+    nb_setarg(Arg, State, N).
 
 
 		 /*******************************
@@ -1822,6 +1832,8 @@ message(error(plunit(incompatible_options, Tests), _)) -->
     [ 'PL-Unit: incompatible test-options: ~p'-[Tests] ].
 message(plunit(sto(true))) -->
     [ 'Option sto(true) is ignored.  See `occurs_check` option.'-[] ].
+message(plunit(test_files(Total, Loaded))) -->
+    [ 'Found ~D .plt test files, loaded ~D'-[Total, Loaded] ].
 
 					% Unit start/end
 message(plunit(jobs(1))) -->
