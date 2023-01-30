@@ -647,6 +647,7 @@ capture_output(Goal, Output, Options) :-
 		 *******************************/
 
 :- dynamic
+    output_streams/2,               % Output, Error
     test_count/1,                   % Count
     passed/5,                       % Unit, Test, Line, Det, Time
     failed/5,                       % Unit, Test, Line, Reason, Time
@@ -712,6 +713,7 @@ run_tests_sync(Units, Options) :-
     cleanup,
     count_tests(Units, Count),
     asserta(test_count(Count)),
+    save_output_state,
     setup_call_cleanup(
 	setup_jobs(Count),
 	setup_call_cleanup(
@@ -854,6 +856,7 @@ unit_options(Unit, Options) :-
 
 cleanup :-
     set_flag(plunit_test, 1),
+    retractall(output_streams(_,_)),
     retractall(test_count(_)),
     retractall(passed(_, _, _, _, _)),
     retractall(failed(_, _, _, _, _)),
@@ -2032,12 +2035,13 @@ message(plunit(test_output(_, Output))) -->
 :- if(swi).
 message(interrupt(begin)) -->
     { thread_self(Me),
-      running(Unit, Test, Line, STO, Me),
+      running(Unit, Test, Line, Progress, Me),
       !,
-      unit_file(Unit, File)
+      unit_file(Unit, File),
+      restore_output_state
     },
     [ 'Interrupted test '-[] ],
-    running(running(Unit:Test, File:Line, STO, Me)),
+    running(running(Unit:Test, File:Line, Progress, Me)),
     [nl],
     '$messages':prolog_message(interrupt(begin)).
 message(interrupt(begin)) -->
@@ -2056,7 +2060,7 @@ det(true) -->
 det(false) -->
     [ 'non-deterministic' ].
 
-running(running(Unit:Test, File:Line, Thread)) -->
+running(running(Unit:Test, File:Line, _Progress, Thread)) -->
     thread(Thread),
     [ '~q:~q at '-[Unit, Test], url(File:Line) ].
 running([H|T]) -->
@@ -2249,17 +2253,31 @@ progress_tag(forall(_,_),   Tag, Keep, Style) =>
 
 
 		 /*******************************
+		 *           OUTPUT		*
+		 *******************************/
+
+save_output_state :-
+    stream_property(Output, alias(user_output)),
+    stream_property(Error, alias(user_error)),
+    asserta(output_streams(Output, Error)).
+
+restore_output_state :-
+    output_streams(Output, Error),
+    !,
+    set_stream(Output, alias(user_output)),
+    set_stream(Error, alias(user_error)).
+restore_output_state.
+
+
+
+		 /*******************************
 		 *      CONCURRENT STATUS       *
 		 *******************************/
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-This part deals with interactive feedback when we are running multiple
- threads.   The terminal  window  cannot  work on  top  of the  Prolog
- message  infrastructure and  (thus)  we have  to  use more  low-level
- means.
-
-
+This part deals with interactive feedback   when we are running multiple
+threads. The terminal window cannot work on   top  of the Prolog message
+infrastructure and (thus) we have to use more low-level means.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 :- dynamic
