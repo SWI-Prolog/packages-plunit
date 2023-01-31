@@ -709,9 +709,9 @@ run_tests(Set, Options) :-
 	),
 	set_test_flag(test_options, Old)).
 
-run_tests_sync(Units, Options) :-
+run_tests_sync(Units0, Options) :-
     cleanup,
-    count_tests(Units, Count),
+    count_tests(Units0, Units, Count),
     asserta(test_count(Count)),
     save_output_state,
     setup_call_cleanup(
@@ -773,12 +773,12 @@ runnable_tests(Spec, Unit:RunnableTests) :-
                 RunnableTests)
     ).
 
-runnable_test(Unit, Test, Module, @(Test,Line)) :-
-    current_test(Unit, Test, Line, _Body, TestOptions),
+runnable_test(Unit, Name, Module, @(Test,Line)) :-
+    current_test(Unit, Name, Line, _Body, TestOptions),
     (   option(blocked(Reason), TestOptions)
-    ->  assert(blocked(Unit, Test, Line, Reason)),
-        fail
-    ;   condition(Module, test(Unit,Test,Line), TestOptions)
+    ->  Test = blocked(Name, Reason)
+    ;   condition(Module, test(Unit,Name,Line), TestOptions),
+        Test = Name
     ).
 
 unit_from_spec(Unit0:Tests0, Unit, Tests, Module, Options), atom(Unit0) =>
@@ -795,18 +795,36 @@ unit_from_spec(Unit0, Unit, _, Module, Options), atom(Unit0) =>
     ;   throw_error(existence_error(unit_test, Unit), _)
     ).
 
-%!  count_tests(+Units, -Count) is det.
+%!  count_tests(+Units0, -Units, -Count) is det.
 %
 %   Count the number of tests to   run. A forall(Generator, Test) counts
 %   as a single test. During the execution,   the  concrete tests of the
 %   _forall_ are considered "sub tests".
 
-count_tests(Units, Count) :-
-    foldl(count_tests_in_unit, Units, 0, Count).
+count_tests(Units0, Units, Count) :-
+    count_tests(Units0, Units, 0, Count).
 
-count_tests_in_unit(_Unit:Tests, Count0, Count) :-
-    length(Tests, N),
-    Count is Count0+N.
+count_tests([], T, C0, C) =>
+    T = [],
+    C = C0.
+count_tests([_:[]|T0], T, C0, C) =>
+    count_tests(T0, T, C0, C).
+count_tests([Unit:Tests|T0], T, C0, C) =>
+    partition(is_blocked, Tests, Blocked, Use),
+    maplist(assert_blocked(Unit), Blocked),
+    (   Use == []
+    ->  count_tests(T0, T, C0, C)
+    ;   length(Use, N),
+        C1 is C0+N,
+        T = [Unit:Use|T1],
+        count_tests(T0, T1, C1, C)
+    ).
+
+is_blocked(@(blocked(_,_),_)) => true.
+is_blocked(_) => fail.
+
+assert_blocked(Unit, @(blocked(Test, Reason), Line)) =>
+    assert(blocked(Unit, Test, Line, Reason)).
 
 %!  run_unit(+Unit) is det.
 %
