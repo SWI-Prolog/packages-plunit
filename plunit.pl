@@ -84,7 +84,7 @@ sicstus :- catch(current_prolog_flag(system_type, _), _, fail).
 throw_error(Error_term,Impldef) :-
     throw(error(Error_term,context(Impldef,_))).
 
-%:- set_prolog_flag(generate_debug_info, false).
+:- set_prolog_flag(generate_debug_info, false).
 current_test_flag(optimise, Value) =>
     current_prolog_flag(optimise, Value).
 current_test_flag(occurs_check, Value) =>
@@ -1800,7 +1800,7 @@ message_level(Level) :-
 
 locationprefix(File:Line) -->
     !,
-    [ url(File:Line), ':\n\t' ].
+    [ url(File:Line), ':'-[], nl, '    ' ].
 locationprefix(test(Unit,_Test,Line)) -->
     !,
     { unit_file(Unit, File) },
@@ -1883,12 +1883,13 @@ blocked_tests(Tests) -->
     [':'-[]],
     list_blocked(Tests).
 blocked_tests(_) -->
-    [ ' (use ', ansi(code, 'show_blocked(true)', []),
-      ' to list blocked tests)'-[]
+    [ ' (use run_tests/2 with ', ansi(code, 'show_blocked(true)', []),
+      ' for details)'-[]
     ].
 
 list_blocked([]) --> !.
 list_blocked([blocked(_Unit:Test, Pos, Reason)|T]) -->
+    [nl],
     locationprefix(Pos),
     test_name(Test, -),
     [ ': ~w'-[Reason] ],
@@ -2078,15 +2079,13 @@ message(interrupt(begin)) -->
 
 test_name(Name, forall(Bindings, _Nth-I)) -->
     !,
-    [ 'test ~w (~d-th forall bindings = ~p)'-[Name, I, Bindings] ].
+    test_name(Name, -),
+    [ ' (~d-th forall bindings = '-[I],
+      ansi(code, '~p', [Bindings]), ')'-[]
+    ].
 test_name(Name, _) -->
     !,
-    [ 'test ~w'-[Name] ].
-
-det(true) -->
-    [ 'deterministic' ].
-det(false) -->
-    [ 'non-deterministic' ].
+    [ 'test ', ansi(code, '~w', [Name]) ].
 
 running(running(Unit:Test, File:Line, _Progress, Thread)) -->
     thread(Thread),
