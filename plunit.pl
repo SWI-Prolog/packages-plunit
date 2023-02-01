@@ -1946,17 +1946,17 @@ message(plunit(fixme(Failed,Passed,Nondet))) -->
 
 message(plunit(begin(Unit:Test, _Location, Progress))) -->
     { tty_columns(SummaryWidth, _Margin),
-      test_name_summary(Test, SummaryWidth, NameS),
+      test_name_summary(Unit:Test, SummaryWidth, NameS),
       progress_string(Progress, ProgressS)
     },
     (   { tty_feedback,
 	  tty_clear_to_eol(CE)
 	}
-    ->  [ at_same_line, '\r[~w] ~w:~w ..~w'-[ProgressS, Unit, NameS,
+    ->  [ at_same_line, '\r[~w] ~w ..~w'-[ProgressS, NameS,
 					     CE], flush ]
     ;   { jobs(_) }
-    ->  [ '[~w] ~w:~w ..'-[ProgressS, Unit, NameS] ]
-    ;   [ '[~w] ~w:~w ..'-[ProgressS, Unit, NameS], flush ]
+    ->  [ '[~w] ~w ..'-[ProgressS, NameS] ]
+    ;   [ '[~w] ~w ..'-[ProgressS, NameS], flush ]
     ).
 message(plunit(end(_UnitTest, _Location, _Progress))) -->
     [].
@@ -1969,12 +1969,12 @@ message(plunit(progress(Unit:Test, Status, Progress, Time))) -->
     { jobs(_),
       !,
       tty_columns(SummaryWidth, Margin),
-      test_name_summary(Test, SummaryWidth, NameS),
+      test_name_summary(Unit;Test, SummaryWidth, NameS),
       progress_string(Progress, ProgressS),
       progress_tag(Status, Tag, _Keep, Style)
     },
-    [ ansi(Style, '[~w] ~w:~w ~`.t ~w (~3f sec)~*|',
-	   [ProgressS, Unit, NameS, Tag, Time.wall, Margin]) ].
+    [ ansi(Style, '[~w] ~~w ~`.t ~w (~3f sec)~*|',
+	   [ProgressS, NameS, Tag, Time.wall, Margin]) ].
 message(plunit(progress(_UnitTest, Status, _Progress, Time))) -->
     { tty_columns(_SummaryWidth, Margin),
       progress_tag(Status, Tag, _Keep, Style)
@@ -2230,12 +2230,16 @@ test_name_summary(Term, MaxLen, Summary) :-
     atom_length(Text, Len),
     (   Len =< MaxLen
     ->  Summary = Text
-    ;   Pre is MaxLen - 8,
+    ;   End is MaxLen//2,
+        Pre is MaxLen - End - 2,
         sub_string(Text, 0, Pre, _, PreText),
-        sub_string(Text, _, 5, 0, PostText),
-        format(string(Summary), '~w...~w', [PreText,PostText])
+        sub_string(Text, _, End, 0, PostText),
+        format(string(Summary), '~w..~w', [PreText,PostText])
     ).
 
+summary_string(Unit:Test, String) =>
+    summary_string(Test, String1),
+    atomics_to_string([Unit, String1], :, String).
 summary_string(@(Name,Vars), String) =>
     format(string(String), '~W (using ~W)',
            [ Name, [numbervars(true), quoted(false)],
@@ -2335,11 +2339,11 @@ job_feedback(Level, Msg) :-
 
 job_feedback(begin(Unit:Test, _Location, Progress)) =>
     tty_columns(SummaryWidth, _Margin),
-    test_name_summary(Test, SummaryWidth, NameS),
+    test_name_summary(Unit:Test, SummaryWidth, NameS),
     progress_string(Progress, ProgressS),
     tty_clear_to_eol(CE),
-    job_format(comment, '\r[~w] ~w:~w ..~w',
-	       [ProgressS, Unit, NameS, CE]),
+    job_format(comment, '\r[~w] ~w ..~w',
+	       [ProgressS, NameS, CE]),
     flush_output.
 job_feedback(end(_UnitTest, _Location, _Progress)) =>
     true.
@@ -2465,7 +2469,7 @@ has_tty :-
 tty_columns(SummaryWidth, Margin) :-
     tty_width(W),
     Margin is W-8,
-    SummaryWidth = max(20,Margin-50).
+    SummaryWidth is max(20,Margin-34).
 
 tty_width(W) :-
     current_predicate(tty_size/2),
