@@ -60,10 +60,7 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 :- autoload(library(apply),
             [maplist/3, include/3, maplist/2, foldl/4, partition/4]).
 :- autoload(library(lists), [member/2, append/2, flatten/2, append/3]).
-:- autoload(library(option),
-            [ option/3, option/2, merge_options/3, select_option/4,
-              select_option/3
-            ]).
+:- autoload(library(option), [ option/3, option/2, select_option/3 ]).
 :- autoload(library(ordsets), [ord_intersection/3]).
 :- autoload(library(error), [must_be/2, domain_error/2]).
 :- autoload(library(thread), [concurrent_forall/2]).
@@ -84,17 +81,40 @@ swi     :- catch(current_prolog_flag(dialect, swi), _, fail), !.
 swi     :- catch(current_prolog_flag(dialect, yap), _, fail).
 sicstus :- catch(current_prolog_flag(system_type, _), _, fail).
 
-
-:- if(swi).
 throw_error(Error_term,Impldef) :-
     throw(error(Error_term,context(Impldef,_))).
 
-:- set_prolog_flag(generate_debug_info, false).
-current_test_flag(Name, Value) :-
-    current_prolog_flag(Name, Value).
+%:- set_prolog_flag(generate_debug_info, false).
+current_test_flag(optimise, Value) =>
+    current_prolog_flag(optimise, Value).
+current_test_flag(occurs_check, Value) =>
+    (   current_prolog_flag(plunit_occurs_check, Value0)
+    ->  Value = Value0
+    ;   current_prolog_flag(occurs_check, Value)
+    ).
+current_test_flag(Name, Value), atom(Name) =>
+    atom_concat(plunit_, Name, Flag),
+    current_prolog_flag(Flag, Value).
+current_test_flag(Name, Value), var(Name) =>
+    global_test_option(Opt, _, _Type, _Default),
+    functor(Opt, Name, 1),
+    current_test_flag(Name, Value).
 
 set_test_flag(Name, Value) :-
-    create_prolog_flag(Name, Value, []).
+    Opt =.. [Name, Value],
+    global_test_option(Opt),
+    !,
+    atom_concat(plunit_, Name, Flag),
+    set_prolog_flag(Flag, Value).
+set_test_flag(Name, _) :-
+    domain_error(test_flag, Name).
+
+current_test_flags(Flags) :-
+    findall(Flag, current_test_flag(Flag), Flags).
+
+current_test_flag(Opt) :-
+    current_test_flag(Name, Value),
+    Opt =.. [Name, Value].
 
 % ensure expansion to avoid tracing
 goal_expansion(forall(C,A),
@@ -102,71 +122,22 @@ goal_expansion(forall(C,A),
 goal_expansion(current_module(Module,File),
 	       module_property(Module, file(File))).
 
-:- if(current_prolog_flag(dialect, yap)).
-
-'$set_predicate_attribute'(_, _, _).
-
-:- endif.
-:- endif.
-
-:- if(sicstus).
-throw_error(Error_term,Impldef) :-
-    throw(error(Error_term,i(Impldef))). % SICStus 3 work around
-
-% SWI-Compatibility
-:- op(700, xfx, =@=).
-
-'$set_source_module'(_, _).
-
-%!  current_test_flag(?Name, ?Value) is nondet.
-%
-%   Query  flags  that  control  the    testing   process.  Emulates
-%   SWI-Prologs flags.
-
-:- dynamic test_flag/2. % Name, Val
-
-current_test_flag(optimise, Val) :-
-    current_prolog_flag(compiling, Compiling),
-    (   Compiling == debugcode ; true % TBD: Proper test
-    ->  Val = false
-    ;   Val = true
-    ).
-current_test_flag(Name, Val) :-
-    test_flag(Name, Val).
-
-
-%!  set_test_flag(+Name, +Value) is det.
-
-set_test_flag(Name, Val) :-
-    var(Name),
-    !,
-    throw_error(instantiation_error, set_test_flag(Name,Val)).
-set_test_flag( Name, Val ) :-
-    retractall(test_flag(Name,_)),
-    asserta(test_flag(Name, Val)).
-
-:- op(1150, fx, thread_local).
-
-:- discontiguous
-    user:term_expansion/2.
-
-user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
-    prolog_load_context(module, plunit).
-
-:- endif.
 
 		 /*******************************
 		 *            IMPORTS           *
 		 *******************************/
 
-:- initialization
-   (   current_test_flag(test_options, _)
-   ->  true
-   ;   set_test_flag(test_options,
-                     [ run(make),       % run tests on make/0
-                       output(on_failure)
-                     ])
-   ).
+:- initialization init_flags.
+
+init_flags :-
+    (   global_test_option(Option, _Value, _Type, Default),
+	Default \== (-),
+	Option =.. [Name,_],
+	atom_concat(plunit_, Name, Flag),
+	create_prolog_flag(Flag, Default, [keep(true)]),
+	fail
+    ;   true
+    ).
 
 %!  set_test_options(+Options)
 %
@@ -194,6 +165,9 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
 %      suppress all output and if `on_failure`, emit the output
 %      if the test fails.
 %
+%    - show_blocked(+Bool)
+%      Show individual blocked tests during the report.
+%
 %    - occurs_check(+Mode)
 %      Defines the default for the `occurs_check` flag during
 %      testing.
@@ -214,54 +188,54 @@ user:term_expansion((:- thread_local(PI)), (:- dynamic(PI))) :-
 %    - timeout(+Seconds)
 %      Set timeout for each individual test.  This acts as a
 %      default that may be overuled at the level of units or
-%      individual tests.
+%      individual tests.   A timeout of 0 or negative is handled
+%      as _inifinite_.
 
 set_test_options(Options) :-
-    select_option(sto(Mode), Options, Options1, _),
-    (   Mode == true
-    ->  print_message(warning, plunit(sto(true)))
+    flatten([Options], List),
+    maplist(set_test_option, List).
+
+set_test_option(sto(true)) =>
+    print_message(warning, plunit(sto(true))).
+set_test_option(jobs(Jobs)) =>
+    must_be(positive_integer, Jobs),
+    (   Jobs > 1
+    ->  set_test_option(concurrent(true))
     ;   true
     ),
-    (   option(jobs(Jobs), Options1),
-	Jobs > 1
-    ->  merge_options([concurrent(true)], Options1, Options2)
-    ;   Options2 = Options1
-    ),
-    valid_options(global_test_option, Options2),
-    (   current_test_flag(test_options, OldOptions)
-    ->  merge_options(Options2, OldOptions, NewOptions),
-        set_test_flag(test_options, NewOptions)
-    ;   set_test_flag(test_options, Options)
-    ).
+    set_test_option_flag(jobs(Jobs)).
+set_test_option(Option),
+  compound(Option), global_test_option(Option) =>
+    set_test_option_flag(Option).
+set_test_option(Option) =>
+    domain_error(option, Option).
 
-global_test_option(load(Load)) :-
-    must_be(oneof([never,always,normal]), Load).
-global_test_option(output(Cond)) :-
-    must_be(oneof([always,on_failure]), Cond).
-global_test_option(format(Feedback)) :-
-    must_be(oneof([tty,log]), Feedback).
-global_test_option(run(When)) :-
-    must_be(oneof([manual,make,make(all)]), When).
-global_test_option(silent(Bool)) :-
-    must_be(boolean, Bool).
-global_test_option(occurs_check(Mode)) :-
-    must_be(oneof([false,true,error]), Mode).
-global_test_option(cleanup(Bool)) :-
-    must_be(boolean, Bool).
-global_test_option(concurrent(Bool)) :-
-    must_be(boolean, Bool).
-global_test_option(jobs(Count)) :-
-    must_be(positive_integer, Count).
-global_test_option(timeout(Number)) :-
-    must_be(number, Number).
+global_test_option(Opt) :-
+    global_test_option(Opt, Value, Type, _Default),
+    must_be(Type, Value).
+
+global_test_option(load(Load), Load, oneof([never,always,normal]), normal).
+global_test_option(output(Cond), Cond, oneof([always,on_failure]), on_failure).
+global_test_option(format(Feedback), Feedback, oneof([tty,log]), tty).
+global_test_option(silent(Silent), Silent, boolean, false).
+global_test_option(show_blocked(Blocked), Blocked, boolean, false).
+global_test_option(run(When), When, oneof([manual,make,make(all)]), make).
+global_test_option(occurs_check(Mode), Mode, oneof([false,true,error]), -).
+global_test_option(cleanup(Bool), Bool, boolean, true).
+global_test_option(concurrent(Bool), Bool, boolean, false).
+global_test_option(jobs(Count), Count, positive_integer, 1).
+global_test_option(timeout(Number), Number, number, 3600).
+
+set_test_option_flag(Option) :-
+    Option =.. [Name, Value],
+    set_test_flag(Name, Value).
 
 %!  loading_tests
 %
 %   True if tests must be loaded.
 
 loading_tests :-
-    current_test_flag(test_options, Options),
-    option(load(Load), Options, normal),
+    current_test_flag(load, Load),
     (   Load == always
     ->  true
     ;   Load == normal,
@@ -602,12 +576,14 @@ test_set_option(timeout(Seconds)) :-
 :- meta_predicate
        reify_tmo(0, -, +),
        reify(0, -),
+       capture_output(0,-),
        capture_output(0,-,+).
 
 %!  reify_tmo(:Goal, -Result, +Options) is det.
 
 reify_tmo(Goal, Result, Options) :-
     option(timeout(Time), Options),
+    Time > 0,
     !,
     reify(call_with_time_limit(Time, Goal), Result0),
     (   Result0 = throw(time_limit_exceeded)
@@ -630,6 +606,10 @@ reify(Goal, Result) :-
 	)
     ;   Result = false
     ).
+
+capture_output(Goal, Output) :-
+    current_test_flag(output, OutputMode),
+    capture_output(Goal, Output, [output(OutputMode)]).
 
 capture_output(Goal, Output, Options) :-
     option(output(How), Options, always),
@@ -700,14 +680,14 @@ run_tests(all, Options) :-
     run_tests(Units, Options).
 run_tests(Set, Options) :-
     valid_options(global_test_option, Options, Global, Rest),
-    current_test_flag(test_options, Old),
+    current_test_flags(Old),
     setup_call_cleanup(
 	set_test_options(Global),
 	( flatten([Set], List),
 	  maplist(runnable_tests, List, Units),
 	  with_mutex(plunit, run_tests_sync(Units, Rest))
 	),
-	set_test_flag(test_options, Old)).
+	set_test_options(Old)).
 
 run_tests_sync(Units0, Options) :-
     cleanup,
@@ -857,8 +837,7 @@ end_unit(Unit, Summary) :-
 run_unit_2(Unit, Tests) :-
     unit_options(Unit, UnitOptions),
     option(concurrent(true), UnitOptions, false),
-    current_test_flag(test_options, GlobalOptions),
-    option(concurrent(true), GlobalOptions),
+    current_test_flag(concurrent, true),
     !,
     concurrent_forall(member(Test, Tests),
                       run_test(Unit, Test)).
@@ -886,9 +865,7 @@ cleanup :-
     retractall(forall_failures(_,_)).
 
 cleanup_after_test :-
-    current_test_flag(test_options, Options),
-    option(cleanup(Cleanup), Options, false),
-    (   Cleanup == true
+    (   current_test_flag(cleanup, true)
     ->  cleanup
     ;   true
     ).
@@ -926,8 +903,7 @@ unit_in_files(Files, Unit) :-
 %   Called indirectly from make/0 after Files have been reloaded.
 
 make_run_tests(Files) :-
-    current_test_flag(test_options, Options),
-    option(run(When), Options, manual),
+    current_test_flag(run, When),
     (   When == make
     ->  run_tests_in_files(Files)
     ;   When == make(all)
@@ -959,9 +935,8 @@ test_assertion_failed(Reason, Goal) :-
     ->  true
     ;   AssertLoc = unknown
     ),
-    current_test_flag(test_options, Options),
     report_failed_assertion(Unit:Test, Line, AssertLoc,
-			    Progress, Reason, Goal, Options),
+			    Progress, Reason, Goal),
     assert_cyclic(failed_assertion(Unit, Test, Line, AssertLoc,
 				   Progress, Reason, Goal)).
 
@@ -973,7 +948,7 @@ assertion_location(Stack, File:Line) :-
     prolog_stack_frame_property(CallerFrame, location(File:Line)).
 
 report_failed_assertion(UnitTest, Line, AssertLoc,
-			Progress, Reason, Goal, _Options) :-
+			Progress, Reason, Goal) :-
     print_message(
 	error,
 	plunit(failed_assertion(UnitTest, Line, AssertLoc,
@@ -1038,19 +1013,23 @@ incr_forall(State, I) :-
 %   Inherit the `timeout` and `occurs_check` option (Global -> Unit -> Test).
 
 run_test_once6(Unit, Name, Progress, Line, UnitOptions, Options, Body) :-
-    current_test_flag(test_options, GlobalOptions),
-    inherit_option(timeout,      Options,  [UnitOptions, GlobalOptions], Options1),
-    inherit_option(occurs_check, Options1, [UnitOptions, GlobalOptions], Options2),
+    current_test_flag(timeout, DefTimeOut),
+    current_test_flag(occurs_check, DefOccurs),
+    inherit_option(timeout,      Options,  [UnitOptions], DefTimeOut, Options1),
+    inherit_option(occurs_check, Options1, [UnitOptions], DefOccurs, Options2),
     run_test_once(Unit, Name, Progress, Line, Options2, Body).
 
-inherit_option(Name, Options0, Chain, Options) :-
+inherit_option(Name, Options0, Chain, Default, Options) :-
     Term =.. [Name,_Value],
     (   option(Term, Options0)
     ->  Options = Options0
     ;   member(Opts, Chain),
         option(Term, Opts)
     ->  Options = [Term|Options0]
-    ;   Options = Options0
+    ;   Default == (-)
+    ->  Options = Options0
+    ;   Opt =.. [Name,Default],
+	Options = [Opt|Options0]
     ).
 
 %!  run_test_once(+Unit, +Name, Progress, +Line, +Options, +Body)
@@ -1059,23 +1038,21 @@ inherit_option(Name, Options0, Chain, Options) :-
 %   unification settings wrt. the occurs check.
 
 run_test_once(Unit, Name, Progress, Line, Options, Body) :-
-    option(occurs_check(Mode), Options),
+    option(occurs_check(Occurs), Options),
     !,
-    current_test_flag(test_options, GlobalOptions),
     begin_test(Unit, Name, Line, Progress),
     current_prolog_flag(occurs_check, Old),
     setup_call_cleanup(
-	set_prolog_flag(occurs_check, Mode),
+	set_prolog_flag(occurs_check, Occurs),
 	capture_output(run_test_6(Unit, Name, Line, Options, Body, Result),
-		       Output, GlobalOptions),
+		       Output),
 	set_prolog_flag(occurs_check, Old)),
     end_test(Unit, Name, Line, Progress),
     report_result(Result, Progress, Output, Options).
 run_test_once(Unit, Name, Progress, Line, Options, Body) :-
-    current_test_flag(test_options, GlobalOptions),
     begin_test(Unit, Name, Line, Progress),
     capture_output(run_test_6(Unit, Name, Line, Options, Body, Result),
-		   Output, GlobalOptions),
+		   Output),
     end_test(Unit, Name, Line, Progress),
     report_result(Result, Progress, Output, Options).
 
@@ -1306,9 +1283,7 @@ match_error(Expect, Rec) :-
 setup(Module, Context, Options) :-
     option(setup(Setup), Options),
     !,
-    current_test_flag(test_options, GlobalOptions),
-    capture_output(reify(call_ex(Module, Setup), Result),
-		   Output, GlobalOptions),
+    capture_output(reify(call_ex(Module, Setup), Result), Output),
     (   Result == true
     ->  true
     ;   print_message(error,
@@ -1324,9 +1299,7 @@ setup(_,_,_).
 condition(Module, Context, Options) :-
     option(condition(Cond), Options),
     !,
-    current_test_flag(test_options, GlobalOptions),
-    capture_output(reify(call_ex(Module, Cond), Result),
-		   Output, GlobalOptions),
+    capture_output(reify(call_ex(Module, Cond), Result), Output),
     (   Result == true
     ->  true
     ;   Result == false
@@ -1461,10 +1434,12 @@ schedule_unit(Unit) :-
 %   Setup threads for concurrent testing.
 
 setup_jobs(Count) :-
-    current_prolog_flag(cpu_count, Cores),
-    current_test_flag(test_options, Options),
-    option(concurrent(true), Options),
-    option(jobs(Jobs0), Options, Cores),
+    current_test_flag(concurrent, true),
+    (   current_test_flag(jobs, Jobs0),
+	integer(Jobs0)
+    ->  true
+    ;   current_prolog_flag(cpu_count, Jobs0)
+    ),
     Jobs is min(Count, Jobs0),
     Jobs > 1,
     !,
@@ -1616,12 +1591,14 @@ test_summary(Unit, Summary) :-
     count(timeout(Unit, _0Test, _0Line, _Limit, _0Time), Timeout),
     count(passed(Unit, _0Test, _0Line, _Det, _0Time), Passed),
     count(blocked(Unit, _0Test, _0Line, _0Reason), Blocked),
+    count(fixme(Unit, _0Test, _0Line, _0Reason, _0How), Fixme),
     test_count(Total),
     Summary = plunit{total:Total,
 		     passed:Passed,
 		     failed:Failed,
 		     timeout:Timeout,
-		     blocked:Blocked}.
+		     blocked:Blocked,
+		     fixme:Fixme}.
 
 test_summary_passed(Summary) :-
     _{failed: 0} :< Summary.
@@ -1636,12 +1613,14 @@ report(Time, _Options) :-
     _{ passed:Passed,
        failed:Failed,
        timeout:Timeout,
-       blocked:Blocked
+       blocked:Blocked,
+       fixme:Fixme
      } :< Summary,
-    (   Passed+Failed+Timeout+Blocked =:= 0
+    (   Passed+Failed+Timeout+Blocked+Fixme =:= 0
     ->  info(plunit(no_tests))
-    ;   Failed+Timeout+Blocked =:= 0
-    ->  report_fixme,
+    ;   Failed+Timeout =:= 0
+    ->  report_blocked(Blocked),
+	report_fixme,
         test_count(Total),
 	info(plunit(all_passed(Total, Passed, Time)))
     ;   report_blocked(Blocked),
@@ -1655,13 +1634,12 @@ report(Time, _Options) :-
 report_blocked(0) =>
     true.
 report_blocked(Blocked) =>
-    info(plunit(blocked(Blocked))),
-    (   blocked(Unit, Name, Line, Reason),
-	unit_file(Unit, File),
-	print_message(informational,
-		      plunit(blocked(File:Line, Name, Reason))),
-	fail ; true
-    ).
+    findall(blocked(Unit:Name, File:Line, Reason),
+	    ( blocked(Unit, Name, Line, Reason),
+	      unit_file(Unit, File)
+	    ),
+	    BlockedTests),
+    info(plunit(blocked(Blocked, BlockedTests))).
 
 report_failed(Failed) :-
     print_message(error, plunit(failed(Failed))).
@@ -1815,11 +1793,9 @@ update_forall_failures(Nth, _) =>
     asserta(forall_failures(Nth, Failed)).
 
 message_level(Level) :-
-    current_test_flag(test_options, Options),
-    option(silent(Silent), Options, false),
-    (   Silent == false
-    ->  Level = informational
-    ;   Level = silent
+    (   current_test_flag(silent, true)
+    ->  Level = silent
+    ;   Level = informational
     ).
 
 locationprefix(File:Line) -->
@@ -1889,34 +1865,56 @@ message(plunit(fixme(Tuples))) -->
     !,
     fixme_message(Tuples).
 message(plunit(total_time(Time))) -->
-    [ 'Total time: ~3f seconds'-[Time.wall] ].
+    [ 'Test run completed'-[] ],
+    test_time(Time).
 
 					% Blocked tests
-message(plunit(blocked(1))) -->
+message(plunit(blocked(1, Tests))) -->
     !,
-    [ 'one test is blocked:'-[] ].
-message(plunit(blocked(N))) -->
-    [ '~D tests are blocked:'-[N] ].
-message(plunit(blocked(Pos, Name, Reason))) -->
+    [ 'one test is blocked'-[] ],
+    blocked_tests(Tests).
+message(plunit(blocked(N, Tests))) -->
+    [ '~D tests are blocked'-[N] ],
+    blocked_tests(Tests).
+
+blocked_tests(Tests) -->
+    { current_test_flag(show_blocked, true) },
+    !,
+    [':'-[]],
+    list_blocked(Tests).
+blocked_tests(_) -->
+    [ ' (use ', ansi(code, 'show_blocked(true)', []),
+      ' to list blocked tests)'-[]
+    ].
+
+list_blocked([]) --> !.
+list_blocked([blocked(_Unit:Test, Pos, Reason)|T]) -->
     locationprefix(Pos),
-    test_name(Name, -),
-    [ ': ~w'-[Reason] ].
+    test_name(Test, -),
+    [ ': ~w'-[Reason] ],
+    list_blocked(T).
 
 					% fail/success
 message(plunit(no_tests)) -->
     !,
     [ 'No tests to run' ].
-message(plunit(all_passed(1, 1, _))) -->
+message(plunit(all_passed(1, 1, Time))) -->
     !,
-    [ 'test passed' ].
+    [ 'test passed' ],
+    test_time(Time).
 message(plunit(all_passed(Total, Total, Time))) -->
     !,
-    [ 'All ~D tests passed in ~3f seconds'-[Total, Time.wall] ].
+    [ 'All ~D tests passed'-[Total] ],
+    test_time(Time).
 message(plunit(all_passed(Total, Count, Time))) -->
     !,
     { SubTests is Count-Total },
-    [ 'All ~D (+~D sub-tests) tests passed in ~3f seconds'-
-      [Total, SubTests, Time.wall] ].
+    [ 'All ~D (+~D sub-tests) tests passed'- [Total, SubTests] ],
+    test_time(Time).
+
+test_time(Time) -->
+    [ ' in ~3f seconds (~3f cpu)'-[Time.wall, Time.cpu] ].
+
 message(plunit(passed(Count))) -->
     !,
     [ '~D tests passed'-[Count] ].
@@ -2460,8 +2458,7 @@ job_self(Job) :-
 
 tty_feedback :-
     has_tty,
-    current_test_flag(test_options, Options),
-    option(format(tty), Options, tty).
+    current_test_flag(format, tty).
 
 has_tty :-
     stream_property(user_output, tty(true)).
