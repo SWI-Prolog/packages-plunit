@@ -1973,7 +1973,7 @@ message(plunit(progress(Unit:Test, Status, Progress, Time))) -->
       progress_string(Progress, ProgressS),
       progress_tag(Status, Tag, _Keep, Style)
     },
-    [ ansi(Style, '[~w] ~~w ~`.t ~w (~3f sec)~*|',
+    [ ansi(Style, '[~w] ~w ~`.t ~w (~3f sec)~*|',
 	   [ProgressS, NameS, Tag, Time.wall, Margin]) ].
 message(plunit(progress(_UnitTest, Status, _Progress, Time))) -->
     { tty_columns(_SummaryWidth, Margin),
