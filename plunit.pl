@@ -1969,7 +1969,7 @@ message(plunit(progress(Unit:Test, Status, Progress, Time))) -->
     { jobs(_),
       !,
       tty_columns(SummaryWidth, Margin),
-      test_name_summary(Unit;Test, SummaryWidth, NameS),
+      test_name_summary(Unit:Test, SummaryWidth, NameS),
       progress_string(Progress, ProgressS),
       progress_tag(Status, Tag, _Keep, Style)
     },
