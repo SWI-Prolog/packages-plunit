@@ -2474,6 +2474,7 @@ tty_columns(SummaryWidth, Margin) :-
 tty_width(W) :-
     current_predicate(tty_size/2),
     catch(tty_size(_Rows, Cols), error(_,_), fail),
+    Cols > 25,
     !,
     W = Cols.
 tty_width(80).
