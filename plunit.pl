@@ -1688,16 +1688,22 @@ test_report(What) :-
 		 *******************************/
 
 %!  unit_file(+Unit, -File) is det.
-%!  unit_file(-Unit, +File) is nondet.
+%!  unit_file(?Unit, ?File) is nondet.
+%
+%   True when the test unit Unit is defined in File.
 
-unit_file(Unit, File) :-
-    current_unit(Unit, Module, _Context, _Options),
-    current_module(Module, File),
+unit_file(Unit, File), nonvar(Unit) =>
+    unit_file_(Unit, File),
     !.
-unit_file(Unit, PlFile) :-
-    nonvar(PlFile),
+unit_file(Unit, File) =>
+    unit_file_(Unit, File).
+
+unit_file_(Unit, File) :-
+    current_unit(Unit, Module, _Context, _Options),
+    module_property(Module, file(File)).
+unit_file_(Unit, PlFile) :-
     test_file_for(TestFile, PlFile),
-    current_module(Module, TestFile),
+    module_property(Module, file(TestFile)),
     current_unit(Unit, Module, _Context, _Options).
 
 
