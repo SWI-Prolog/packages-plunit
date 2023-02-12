@@ -63,7 +63,6 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 :- autoload(library(option), [ option/3, option/2, select_option/3 ]).
 :- autoload(library(ordsets), [ord_intersection/3]).
 :- autoload(library(error), [must_be/2, domain_error/2]).
-:- autoload(library(thread), [concurrent_forall/2]).
 :- autoload(library(aggregate), [aggregate_all/3]).
 :- autoload(library(streams), [with_output_to/3]).
 :- autoload(library(time), [call_with_time_limit/2]).
@@ -177,13 +176,9 @@ init_flags :-
 %      of run_tests/1.  Used to improve cooperation with
 %      memory debuggers such as dmalloc.
 %
-%    - concurrent(+Bool)
-%      If `true` (default `false`), run all tests in a unit
-%      concurrently.
-%
 %    - jobs(Num)
-%      Number of jobs to use for concurrent testing.  Defaults
-%      to the number of cores.
+%      Number of jobs to use for concurrent testing.  Default
+%      is one, implying sequential testing.
 %
 %    - timeout(+Seconds)
 %      Set timeout for each individual test.  This acts as a
@@ -199,10 +194,6 @@ set_test_option(sto(true)) =>
     print_message(warning, plunit(sto(true))).
 set_test_option(jobs(Jobs)) =>
     must_be(positive_integer, Jobs),
-    (   Jobs > 1
-    ->  set_test_option(concurrent(true))
-    ;   true
-    ),
     set_test_option_flag(jobs(Jobs)).
 set_test_option(Option),
   compound(Option), global_test_option(Option) =>
@@ -222,7 +213,6 @@ global_test_option(show_blocked(Blocked), Blocked, boolean, false).
 global_test_option(run(When), When, oneof([manual,make,make(all)]), make).
 global_test_option(occurs_check(Mode), Mode, oneof([false,true,error]), -).
 global_test_option(cleanup(Bool), Bool, boolean, true).
-global_test_option(concurrent(Bool), Bool, boolean, false).
 global_test_option(jobs(Count), Count, positive_integer, 1).
 global_test_option(timeout(Number), Number, number, 3600).
 
@@ -565,7 +555,8 @@ test_set_option(cleanup(X)) :-
 test_set_option(occurs_check(V)) :-
     must_be(oneof([false,true,error]), V).
 test_set_option(concurrent(V)) :-
-    must_be(boolean, V).
+    must_be(boolean, V),
+    print_message(informational, plunit(concurrent)).
 test_set_option(timeout(Seconds)) :-
     must_be(number, Seconds).
 
@@ -724,7 +715,7 @@ report_and_cleanup(Ref, Time, Options) :-
 
 run_units(Units, _Options) :-
     maplist(schedule_unit, Units),
-    job_wait.
+    job_wait(_).
 
 %!  runnable_tests(+Spec, -Plan) is det.
 %
@@ -833,15 +824,6 @@ end_unit(Unit, Summary) :-
     job_info(end(unit(Unit, Summary))),
     job_feedback(informational, end(Unit, Summary)).
 
-:- if(current_prolog_flag(threads, true)).
-run_unit_2(Unit, Tests) :-
-    unit_options(Unit, UnitOptions),
-    option(concurrent(true), UnitOptions, false),
-    current_test_flag(concurrent, true),
-    !,
-    concurrent_forall(member(Test, Tests),
-                      run_test(Unit, Test)).
-:- endif.
 run_unit_2(Unit, Tests) :-
     forall(member(Test, Tests),
 	   run_test(Unit, Test)).
@@ -1434,7 +1416,6 @@ schedule_unit(Unit) :-
 %   Setup threads for concurrent testing.
 
 setup_jobs(Count) :-
-    current_test_flag(concurrent, true),
     (   current_test_flag(jobs, Jobs0),
 	integer(Jobs0)
     ->  true
@@ -1469,6 +1450,8 @@ plunit_job(Queue) :-
 
 job(unit(Unit:Tests)) =>
     run_unit(Unit:Tests).
+job(test(Unit, Test)) =>
+    run_test(Unit, Test).
 
 cleanup_jobs :-
     retract(job_data(Queue, TIDSs)),
@@ -1477,24 +1460,23 @@ cleanup_jobs :-
     maplist(thread_join, TIDSs).
 cleanup_jobs.
 
-%!  job_wait is det.
+%!  job_wait(?Unit) is det.
 %
 %   Wait for all test jobs to finish.
 
-job_wait :-
-    thread_wait(\+ scheduled_unit(_),
+job_wait(Unit) :-
+    thread_wait(\+ scheduled_unit(Unit),
 		[ wait_preds([scheduled_unit/1]),
 		  timeout(1)
 		]),
     !.
-job_wait :-
+job_wait(Unit) :-
     job_data(_Queue, TIDs),
     member(TID, TIDs),
     thread_property(TID, status(running)),
     !,
-    job_wait.
-job_wait.
-
+    job_wait(Unit).
+job_wait(_).
 
 
 job_info(begin(unit(_Unit))) =>
@@ -1510,7 +1492,7 @@ schedule_unit(Unit) :-
 setup_jobs(_) :-
     print_message(silent, plunit(jobs(1))).
 cleanup_jobs.
-job_wait.
+job_wait(_).
 job_info(_).
 
 :- endif.
@@ -2082,6 +2064,11 @@ message(interrupt(begin)) -->
 message(interrupt(begin)) -->
     '$messages':prolog_message(interrupt(begin)).
 :- endif.
+
+message(concurrent) -->
+    [ 'concurrent(true) at the level of units is currently ignored.', nl,
+      'See set_test_options/1 with jobs(Count) for concurrent testing.'
+    ].
 
 test_name(Name, forall(Bindings, _Nth-I)) -->
     !,
