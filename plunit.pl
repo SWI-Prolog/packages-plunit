@@ -1821,7 +1821,7 @@ message(plunit(test_files(Total, Loaded))) -->
 message(plunit(jobs(1))) -->
     !.
 message(plunit(jobs(N))) -->
-    [ 'Tesing with ~D parallel jobs'-[N] ].
+    [ 'Testing with ~D parallel jobs'-[N] ].
 message(plunit(begin(_Unit))) -->
     { tty_feedback },
     !.
