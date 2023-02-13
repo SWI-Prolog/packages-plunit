@@ -689,9 +689,15 @@ run_tests_sync(Units0, Options) :-
 	setup_jobs(Count),
 	setup_call_cleanup(
 	    setup_trap_assertions(Ref),
-	    call_time(run_units(Units, Options), Time),
+	    ( call_time(run_units(Units, Options), Time),
+              test_summary(_All, Summary)
+            ),
 	    report_and_cleanup(Ref, Time, Options)),
-	cleanup_jobs).
+	cleanup_jobs),
+    (   option(summary(Summary), Options)
+    ->  true
+    ;   test_summary_passed(Summary) % fail if some test failed
+    ).
 
 %!  report_and_cleanup(+Ref, +Time, +Options)
 %
@@ -700,13 +706,8 @@ run_tests_sync(Units0, Options) :-
 
 report_and_cleanup(Ref, Time, Options) :-
     cleanup_trap_assertions(Ref),
-    test_summary(_All, Summary),
     report(Time, Options),
-    cleanup_after_test,
-    (   option(summary(Summary), Options)
-    ->  true
-    ;   test_summary_passed(Summary) % fail if some test failed
-    ).
+    cleanup_after_test.
 
 
 %!  run_units_and_check_errors(+Units, +Options) is semidet.
