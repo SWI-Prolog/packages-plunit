@@ -970,7 +970,7 @@ run_test(Unit, Name, Line, UnitOptions, Options, Body) :-
     term_variables(Generator, Vars),
     start_test(Unit, @(Name,Line), Nth),
     State = state(0),
-    call_time(forall(Module:Generator,                      % may become concurrent
+    call_time(forall(Module:Generator,            % may become concurrent
                      (   incr_forall(State, I),
                          run_test_once6(Unit, Name, forall(Vars, Nth-I), Line,
                                         UnitOptions, Options, Body)
@@ -1331,7 +1331,7 @@ success(Unit, Name, Progress, Line, Det, Time, _Output, Options) :-
     flush_output(user_error),
     assert(fixme(Unit, Name, Line, Reason, Ok)).
 success(Unit, Name, Progress, Line, _, Time, Output, Options) :-
-    failed_assertion(Unit, Name, Line, _,_,_,_),
+    failed_assertion(Unit, Name, Line, _,Progress,_,_),
     !,
     failure(Unit, Name, Progress, Line, assertion, Time, Output, Options).
 success(Unit, Name, Progress, Line, Det, Time, _Output, Options) :-
