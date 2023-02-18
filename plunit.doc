@@ -202,38 +202,10 @@ order.\footnote{The result is only well-defined of \arg{Cmp} is
 If this keyword appears in the option list, non-deterministic success
 of the body is not considered an error.
 
-    \termitem{sto}{Terms}
-Declares that executing body is subject to occurs-check (STO).  The
-test is executed with \arg{Terms}.  \arg{Terms} is either
-\const{rational_trees} or \const{finite_trees}.  STO programs are not
-portable between different kinds of terms.  Only programs \emph{not}
-subject to occurs-check (NSTO) are portable\footnote{See 7.3.3 of
-ISO/IEC 13211-1 PROLOG: Part 1 - General Core, for a detailed
-discussion of STO and NSTO}.  Fortunately, most practical programs are
-NSTO.  Writing tests that are STO is still useful to ensure the
-robustness of a predicate.  In case sto4 and sto5 below, an infinite
-list (a rational tree) is created prior to calling the actual
-predicate.  Ideally, such cases produce a type error or fail silently.
-
-\begin{code}
-test(sto1, [sto(rational_trees)]) :-
-	X=s(X).
-test(sto2, [sto(finite_trees),fail]) :-
-	X=s(X).
-test(sto3, [sto(rational_trees), fail]) :-
-	X=s(X), fail.
-test(sto4, [sto(rational_trees),error(type_error(list,L))]) :-
-	L = [_|L], length(L,_).
-test(sto5, [sto(rational_trees),fail]) :-
-	L = [_|L], length(L,3).
-\end{code}
-
-Programs that depend on STO cases tend to be inefficient, even
-incorrect, are hard to understand and debug, and terminate poorly.  It
-is therefore advisable to avoid STO programs whenever possible.
-
-SWI's Prolog flag \prologflag{occurs_check} must not be modified
-within plunit tests.
+    \termitem{occurs_check}{Mode}
+Run the test in a particular \jargon{occurs check mode}.  Mode is
+one of \const{false} (default), \const{true} or \const{error}.  See
+the Prolog flag \prologflag{occurs_check} for details.
 
 \end{description}
 
@@ -265,9 +237,9 @@ Executed before executing any of the tests.
         \termitem{cleanup}{:Goal}
 Executed after completion of all tests in the unit.
 
-	\termitem{sto}{+Terms}
+	\termitem{occurs_check}{+Mode}
 Specify default for subject-to-occurs-check mode. See \secref{unitbox}
-for details on the sto option.
+for details on the \const{occurs_check} option.
     \end{description}
 \end{description}
 
@@ -533,15 +505,38 @@ run for reloaded files, but not for files loaded the first time. Using
 \const{make(all)} make/0 will run all test-suites, not only those that
 belong to files that are reloaded.
 
-    \termitem{silent}{+Bool}
-When \const{true} (default is \const{false}), send informational
-messages using the `silent' level.  In practice this means there
-is no output except for errors.
+    \termitem{format}{+Format}
+Currently one of \const{tty} (default if there is a console) or
+\const{log}. \const{tty} uses terminal control to overwrite successful
+tests, allowing the user to see the currently running tests and output
+from failed tests. This is the default of the output is a tty.
+\const{log} prints a full log of the executed tests and their result and
+is intended for non-interactive usage.
 
-    \termitem{sto}{+Bool}
-When \const{true} (default \const{false}), assume tests are not subject
-to occurs check (non-STO) and verify this if the Prolog implementation
-supports testing this.
+    \termitem{output}{+When}
+If \const{always}, emit all output as it is produced, if \const{never},
+suppress all output and if \const{on_failure}, emit the output if the
+test fails.
+
+    \termitem{show_blocked}{+Bool}
+Show individual blocked tests during the report.
+
+    \termitem{occurs_check}{+Mode}
+Defines the default for the \const{occurs_check} flag during testing.
+
+    \termitem{cleanup}{+Bool}
+If \const{true} (default \const{false}), cleanup report at the end of
+run_tests/1. Used to improve cooperation with memory debuggers such as
+dmalloc.
+
+    \termitem{jobs}{Num}
+Number of jobs to use for concurrent testing. Default is one, implying
+sequential testing.
+
+    \termitem{timeout}{+Seconds}
+Set timeout for each individual test. This acts as a default that may be
+overuled at the level of units or individual tests. A timeout of 0 or
+negative is handled as \emph{inifinite}.
 \end{description}
 
     \predicate{load_test_files}{1}{+Options}
