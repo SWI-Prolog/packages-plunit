@@ -65,8 +65,10 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 :- autoload(library(error), [must_be/2, domain_error/2]).
 :- autoload(library(aggregate), [aggregate_all/3]).
 :- autoload(library(streams), [with_output_to/3]).
-:- autoload(library(time), [call_with_time_limit/2]).
 :- autoload(library(ansi_term), [ansi_format/3]).
+:- if(exists_source(library(time))).
+:- autoload(library(time), [call_with_time_limit/2]).
+:- endif.
 
 :- meta_predicate
     valid_options(1, +),
@@ -572,6 +574,7 @@ test_set_option(timeout(Seconds)) :-
 
 %!  reify_tmo(:Goal, -Result, +Options) is det.
 
+:- if(current_predicate(call_with_time_limit/2)).
 reify_tmo(Goal, Result, Options) :-
     option(timeout(Time), Options),
     Time > 0,
@@ -581,6 +584,7 @@ reify_tmo(Goal, Result, Options) :-
     ->  Result = throw(time_limit_exceeded(Time))
     ;   Result = Result0
     ).
+:- endif.
 reify_tmo(Goal, Result, _Options) :-
     reify(Goal, Result).
 
