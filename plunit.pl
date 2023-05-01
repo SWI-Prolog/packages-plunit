@@ -1881,10 +1881,10 @@ blocked_tests(_) -->
     ].
 
 list_blocked([]) --> !.
-list_blocked([blocked(_Unit:Test, Pos, Reason)|T]) -->
+list_blocked([blocked(Unit:Test, Pos, Reason)|T]) -->
     [nl],
     locationprefix(Pos),
-    test_name(Test, -),
+    test_name(Unit:Test, -),
     [ ': ~w'-[Reason] ],
     list_blocked(T).
 
@@ -1906,6 +1906,8 @@ message(plunit(all_passed(Total, Count, Time))) -->
     [ 'All ~D (+~D sub-tests) tests passed'- [Total, SubTests] ],
     test_time(Time).
 
+test_time(Time) -->
+    { var(Time) }, !.
 test_time(Time) -->
     [ ' in ~3f seconds (~3f cpu)'-[Time.wall, Time.cpu] ].
 
@@ -1981,14 +1983,14 @@ message(plunit(progress(_UnitTest, Status, _Progress, Time))) -->
 message(plunit(failed(Unit:Test, Progress, Line, Failure, _Time, Output))) -->
     { unit_file(Unit, File) },
     locationprefix(File:Line),
-    test_name(Test, Progress),
+    test_name(Unit:Test, Progress),
     [': '-[] ],
     failure(Failure),
     test_output(Output).
 message(plunit(timeout(Unit:Test, Progress, Line, Limit, Output))) -->
     { unit_file(Unit, File) },
     locationprefix(File:Line),
-    test_name(Test, Progress),
+    test_name(Unit:Test, Progress),
     [': '-[] ],
     timeout(Limit),
     test_output(Output).
@@ -1997,7 +1999,7 @@ message(plunit(failed_assertion(Unit:Test, Line, AssertLoc,
 				Progress, Reason, Goal))) -->
     { unit_file(Unit, File) },
     locationprefix(File:Line),
-    test_name(Test, Progress),
+    test_name(Unit:Test, Progress),
     [ ': assertion'-[] ],
     assertion_location(AssertLoc, File),
     assertion_reason(Reason), ['\n\t'],
@@ -2083,7 +2085,7 @@ test_name(Name, forall(Bindings, _Nth-I)) -->
     ].
 test_name(Name, _) -->
     !,
-    [ 'test ', ansi(code, '~w', [Name]) ].
+    [ 'test ', ansi(code, '~q', [Name]) ].
 
 running(running(Unit:Test, File:Line, _Progress, Thread)) -->
     thread(Thread),
