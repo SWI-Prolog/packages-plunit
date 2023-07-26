@@ -70,6 +70,9 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 :- autoload(library(time), [call_with_time_limit/2]).
 :- endif.
 
+:- public
+    unit_module/2.
+
 :- meta_predicate
     valid_options(1, +),
     count(0, -).
@@ -1484,10 +1487,11 @@ job_wait(Unit) :-
 job_wait(_).
 
 
-job_info(begin(unit(_Unit))) =>
-    true.
-job_info(end(unit(Unit, _Summary))) =>
-    retractall(scheduled_unit(Unit)).
+job_info(begin(unit(Unit))) =>
+    print_message(silent, plunit(begin(Unit))).
+job_info(end(unit(Unit, Summary))) =>
+    retractall(scheduled_unit(Unit)),
+    print_message(silent, plunit(end(Unit, Summary))).
 
 :- else.			% No jobs
 
