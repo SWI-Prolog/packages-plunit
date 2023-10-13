@@ -573,7 +573,8 @@ test_set_option(timeout(Seconds)) :-
        reify_tmo(0, -, +),
        reify(0, -),
        capture_output(0,-),
-       capture_output(0,-,+).
+       capture_output(0,-,+),
+       got_messages(0,-).
 
 %!  reify_tmo(:Goal, -Result, +Options) is det.
 
@@ -605,19 +606,54 @@ reify(Goal, Result) :-
     ;   Result = false
     ).
 
+%!  capture_output(:Goal, -Output) is semidet.
+%!  capture_output(:Goal, -Output, +Options) is semidet.
+%
+%   @arg Output is a pair `Msgs-String`, where  `Msgs` is a boolean that
+%   is true if there were messages that   require a non-zero exit status
+%   and Output contains the output as a string.
+
 capture_output(Goal, Output) :-
     current_test_flag(output, OutputMode),
     capture_output(Goal, Output, [output(OutputMode)]).
 
-capture_output(Goal, Output, Options) :-
+capture_output(Goal, Msgs-Output, Options) :-
     option(output(How), Options, always),
     (   How == always
-    ->  call(Goal)
-    ;   with_output_to(string(Output), Goal,
+    ->  call(Goal),
+        Msgs = false                % irrelavant
+    ;   with_output_to(string(Output), got_messages(Goal, Msgs),
                        [ capture([user_output, user_error]),
                          color(true)
                        ])
     ).
+
+%!  got_messages(:Goal, -Result)
+
+got_messages(Goal, Result) :-
+    (   current_prolog_flag(on_warning, status)
+    ;   current_prolog_flag(on_error, status)
+    ), !,
+    nb_delete(plunit_got_message),
+    setup_call_cleanup(
+        asserta(( user:thread_message_hook(_Term, Kind, _Lines) :-
+                      got_message(Kind), fail), Ref),
+        Goal,
+        erase(Ref)),
+    (   nb_current(plunit_got_message, true)
+    ->  Result = true
+    ;   Result = false
+    ).
+got_messages(Goal, false) :-
+    call(Goal).
+
+:- public got_message/1.
+got_message(warning) :-
+    current_prolog_flag(on_warning, status), !,
+    nb_setval(plunit_got_message, true).
+got_message(error) :-
+    current_prolog_flag(on_error, status), !,
+    nb_setval(plunit_got_message, true).
 
 
 		 /*******************************
@@ -1341,6 +1377,10 @@ success(Unit, Name, Progress, Line, _, Time, Output, Options) :-
     failed_assertion(Unit, Name, Line, _,Progress,_,_),
     !,
     failure(Unit, Name, Progress, Line, assertion, Time, Output, Options).
+success(Unit, Name, Progress, Line, _, Time, Output, Options) :-
+    Output = true-_,
+    !,
+    failure(Unit, Name, Progress, Line, message, Time, Output, Options).
 success(Unit, Name, Progress, Line, Det, Time, _Output, Options) :-
     assert(passed(Unit, Name, Line, Det, Time)),
     (   (   Det == true
@@ -2042,9 +2082,13 @@ unqualify(M:Goal, _, Goal) :-
     !.
 unqualify(Goal, _, Goal).
 
+test_output(Msgs-String) -->
+    { nonvar(Msgs) },
+    !,
+    test_output(String).
 test_output("") --> [].
 test_output(Output) -->
-    [ ansi(code, '~s', [Output]) ].
+    [ ansi(code, '~N~s', [Output]) ].
 
 :- endif.
 					% Setup/condition errors
@@ -2186,6 +2230,9 @@ failure(throw(Error)) -->
     },
     [ 'received error: ~w'-[Message] ].
 :- endif.
+failure(message) -->
+    !,
+    [ 'Generated unexpected warning or error'-[] ].
 failure(Why) -->
     [ '~p'-[Why] ].
 
@@ -2381,8 +2428,12 @@ hide_progress(forall(_,_)).
 hide_progress(failed).
 hide_progress(timeout(_)).
 
+print_test_output(Error, _Msgs-Output) =>
+    print_test_output(Error, Output).
 print_test_output(_, "") => true.
 print_test_output(assertion, Output) =>
+    print_message(debug, plunit(test_output(error, Output))).
+print_test_output(message, Output) =>
     print_message(debug, plunit(test_output(error, Output))).
 print_test_output(_, Output) =>
     print_message(debug, plunit(test_output(informational, Output))).
