@@ -266,9 +266,11 @@ list_details(File, Options) :-
     memberchk(M, Modules),
     !.
 list_details(File, Options) :-
-    (   source_file_property(File, module(M))
-    ->  module_property(M, class(user))
-    ;   true     % non-module file must be user file.
+    (   source_file_property(File, module(M)),
+        module_property(M, class(user))
+    ->  true
+    ;   forall(source_file_property(File, module(M)),
+               module_property(M, class(test)))
     ),
     annotate_file(Options).
 
