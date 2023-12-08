@@ -47,7 +47,7 @@
 :- autoload(library(lists), [append/3]).
 :- autoload(library(option), [option/2, option/3]).
 :- autoload(library(readutil), [read_line_to_string/2]).
-:- use_module(prolog_breakpoints, []).
+:- use_module(library(prolog_breakpoints), []).
 
 :- set_prolog_flag(generate_debug_info, false).
 
