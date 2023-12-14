@@ -2539,7 +2539,10 @@ tty_header_line(Width) :-
 
 :- if(current_predicate(tty_get_capability/3)).
 tty_clear_to_eol(S) :-
-    tty_get_capability(ce, string, S),
+    getenv('TERM', _),
+    catch(tty_get_capability(ce, string, S),
+          error(_,_),
+          fail),
     !.
 :- endif.
 tty_clear_to_eol('\e[K').
