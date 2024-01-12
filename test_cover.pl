@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           https://www.swi-prolog.org
-    Copyright (c)  2006-2022, University of Amsterdam
+    Copyright (c)  2006-2023, University of Amsterdam
                               VU University Amsterdam
                               SWI-Prolog Solutions b.v.
     All rights reserved.
@@ -59,23 +59,17 @@ the _head unification_ succeeded. For each clause  we count how often it
 succeeded and how often it  failed.  In   addition  we  track  all _call
 sites_, creating goal-by-goal annotated clauses.
 
-This module relies on the  SWI-Prolog   tracer  hooks. It modifies these
-hooks and collects the results, after   which  it restores the debugging
-environment.  This has some limitations:
-
-        * The performance degrades significantly (about 10 times)
-        * It is not possible to use the debugger during coverage analysis
-        * The cover analysis tool is currently not thread-safe.
-
 The result is  represented  as  a   list  of  clause-references.  As the
 references to clauses of dynamic predicates  cannot be guaranteed, these
 are omitted from the result.
 
-@bug    Relies heavily on SWI-Prolog internals. We have considered using
-        a meta-interpreter for this purpose, but it is nearly impossible
-        to do 100% complete meta-interpretation of Prolog.  Example
-        problem areas include handling cuts in control-structures
-        and calls from non-interpreted meta-predicates.
+Using  show_coverage/2  with  the  option   annotate(true),  implied  by
+ext(Ext) or dir(Dir), the analysis creates   a  line-by-line copy of the
+source files that is  annotated  with  how   many  times  this  line was
+executed and with what  logical  results.   These  annotations  rely  on
+relating executable code to source  locations   which  is  shared by the
+source level debugger.  Source  level  rewrites   due  to  term  or goal
+expansion may harm the results.
 */
 
 
@@ -122,6 +116,18 @@ are omitted from the result.
 %     - color(Boolean)
 %       Controls using ANSI escape sequences to color the output
 %       in the annotated source.  Default is `true`.
+%
+%   For example, run a goal and create   annotated  files in a directory
+%   `cov` using:
+%
+%       ?- show_coverage(mygoal, [dir(cov)]).
+%
+%   @bug Color annotations are created using   ANSI escape sequences. On
+%   most systems these are displayed  if  the   file  is  printed on the
+%   terminal. On most systems `less` may be   used with the ``-r`` flag.
+%   Alternatively, programs such as `ansi2html` (Linux)   may be used to
+%   convert the files to HTML. It would  probably be better to integrate
+%   the output generation with library(pldoc/doc_htmlsrc).
 
 show_coverage(Goal) :-
     show_coverage(Goal, []).
