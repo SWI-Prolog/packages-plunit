@@ -81,9 +81,8 @@ please visit https://www.swi-prolog.org/pldoc/package/plunit.
 		 *    CONDITIONAL COMPILATION   *
 		 *******************************/
 
-swi     :- catch(current_prolog_flag(dialect, swi), _, fail), !.
-swi     :- catch(current_prolog_flag(dialect, yap), _, fail).
-sicstus :- catch(current_prolog_flag(system_type, _), _, fail).
+swi     :- catch(current_prolog_flag(dialect, swi),     _, fail).
+sicstus :- catch(current_prolog_flag(dialect, sicstus), _, fail).
 
 throw_error(Error_term,Impldef) :-
     throw(error(Error_term,context(Impldef,_))).
@@ -134,14 +133,24 @@ goal_expansion(current_module(Module,File),
 :- initialization init_flags.
 
 init_flags :-
-    (   global_test_option(Option, _Value, _Type, Default),
+    (   global_test_option(Option, _Value, Type, Default),
 	Default \== (-),
 	Option =.. [Name,_],
 	atom_concat(plunit_, Name, Flag),
-	create_prolog_flag(Flag, Default, [keep(true)]),
+        flag_type(Type, FlagType),
+	create_prolog_flag(Flag, Default, [type(FlagType), keep(true)]),
 	fail
     ;   true
     ).
+
+flag_type(boolean, FlagType) => FlagType = boolean.
+flag_type(Type, FlagType), Type = oneof(Atoms), maplist(atom, Atoms) =>
+    FlagType = Type.
+flag_type(oneof(_), FlagType) => FlagType = term.
+flag_type(positive_integer, FlagType) => FlagType = integer.
+flag_type(number, FlagType) => FlagType = float.
+
+
 
 %!  set_test_options(+Options)
 %
