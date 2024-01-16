@@ -1,7 +1,7 @@
 /*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker
-    E-mail:        J.Wielemaker@vu.nl
+    E-mail:        jan@swi-prolog.org
     WWW:           https://www.swi-prolog.org
     Copyright (c)  2006-2023, University of Amsterdam
                               VU University Amsterdam
@@ -35,26 +35,33 @@
 */
 
 :- module(prolog_cover,
-          [ show_coverage/1,            % :Goal
-            show_coverage/2             % :Goal, +Modules
+          [ coverage/1,                 % :Goal
+            coverage/2,                 % :Goal, +Options
+            show_coverage/1,            % :Options
+            show_coverage/2,            % :Goal, +Options (deprecated)
+            cov_save_data/2,            % +File, +Options
+            cov_load_data/2,            % +File, +Options
+            cov_reset/0                 %
           ]).
 :- autoload(library(apply), [exclude/3, maplist/2, convlist/3]).
 :- autoload(library(ordsets),
-            [ord_intersect/2, ord_intersection/3, ord_subtract/3, ord_union/3]).
+            [ord_intersection/3, ord_subtract/3, ord_union/3]).
 :- autoload(library(pairs), [group_pairs_by_key/2, pairs_keys_values/3]).
 :- autoload(library(ansi_term), [ansi_format/3]).
 :- autoload(library(filesex), [directory_file_path/3, make_directory_path/1]).
-:- autoload(library(lists), [append/3, flatten/2, max_list/2]).
+:- autoload(library(lists), [append/3, flatten/2, max_list/2, member/2]).
 :- autoload(library(option), [option/2, option/3]).
 :- autoload(library(readutil), [read_line_to_string/2]).
 :- use_module(library(prolog_breakpoints), []).
 :- autoload(library(prolog_clause), [clause_info/4]).
 :- autoload(library(solution_sequences), [call_nth/2]).
 :- use_module(library(debug), [debug/3]).
+:- autoload(library(error), [must_be/2]).
+:- autoload(library(prolog_code), [pi_head/2]).
 
 :- set_prolog_flag(generate_debug_info, false).
 
-/** <module> Clause coverage analysis
+/** <module> Coverage analysis tool
 
 The purpose of this module is to find which part of the program has been
 used by a certain goal. Usage is defined   in terms of clauses for which
@@ -66,31 +73,158 @@ The result is  represented  as  a   list  of  clause-references.  As the
 references to clauses of dynamic predicates  cannot be guaranteed, these
 are omitted from the result.
 
-Using  show_coverage/2  with  the  option   annotate(true),  implied  by
-ext(Ext) or dir(Dir), the analysis creates   a  line-by-line copy of the
-source files that is  annotated  with  how   many  times  this  line was
-executed and with what  logical  results.   These  annotations  rely  on
-relating executable code to source  locations   which  is  shared by the
-source level debugger.  Source  level  rewrites   due  to  term  or goal
-expansion may harm the results.
+Using coverage/2 with the option annotate(true),  implied by ext(Ext) or
+dir(Dir), the analysis creates a line-by-line   copy of the source files
+that is annotated with how many times   this  line was executed and with
+what logical results. These annotations rely on relating executable code
+to source locations which is shared by the source level debugger. Source
+level rewrites due to term or goal expansion may harm the results.
+
+The typical usage is to load the program  and run the query below to get
+a report by  file  with  percentages   and  a  directory  `cov`  holding
+annotated   files   that   provide     line-by-line   annotations.   See
+show_coverage/1 for details.
+
+   ?- coverage(Goal, [dir(cov)]).
+
+## Coverage collection and threads {#coverage-threads}
+
+The coverage collect data structure is   shared  by threads created from
+the thread that is collecting  coverage   data.  Currently,  this thread
+should be _joined_ before we can operate on the coverage data.
+
+## Combining coverage data from multiple runs {#coverage-merge}
+
+The coverage tools allow  both  combining   data  from  running multiple
+queries as combining data from multiple Prolog processes.
+
+For multiple queries in the same process, coverage data may be collected
+using  coverage/1  which,  unlike  coverage/2,    does  not  change  the
+non-deterministic semantics of the  `Goal`  and   adds  to  the  already
+collected data. If no current collection   is in progress, the currently
+collected data can be displayed using show_coverage/1.
+
+Coverage data may be saved to a   file using cov_save_data/2. Saved data
+can be reloaded using cov_load_data/2. Data   from  multiple Prolog runs
+can be combined  in  the  same   file  using  cov_save_data/2  with  the
+append(true) option. When possible, file locking  is used to ensure that
+concurrect processes can safely use the same   data file. The result can
+be shown by loading  the  code  that   was  relevant  to  all  runs, use
+cov_load_data/2 and show the result using show_coverage/1.
+
+Note that saving  an  loading  the   coverage  data  saves  and restores
+references to the clauses as the Nth clause  of a predicate defined in a
+specific file. This implies that the program   must be loaded in exactly
+the same way, including  optimization   level,  term/goal  expansion and
+order of _multifile_ predicates.
+
+## Predicate reference {#coverage-predicates}
 */
 
-
 :- meta_predicate
-    show_coverage(0),
-    show_coverage(0,+).
+    coverage(0),
+    coverage(0,+),                      % :Goal, +Options
+    show_coverage(:),                   % +Options
+    show_coverage(0,+).                 % :Goal, +Options (deprecated)
 
-%!  show_coverage(:Goal) is semidet.
-%!  show_coverage(:Goal, +Options) is semidet.
-%!  show_coverage(:Goal, +Modules:list(atom)) is semidet.
+:- predicate_options(show_coverage/1, 1,
+                     [ all(boolean),
+                       modules(list(atom)),
+                       roots(list),
+                       annotate(boolean),
+                       ext(atom),
+                       dir(atom),
+                       line_numbers(boolean),
+                       color(boolean)
+                     ]).
+:- predicate_options(coverage/2, 2,
+                     [ show(boolean),
+                       pass_to(prolog_cover:show_coverage/1,1)
+                     ]).
+:- predicate_options(cov_save_data/2, 2,
+                     [ append(boolean)
+                     ]).
+:- predicate_options(cov_load_data/2, 2,
+                     [ load(boolean),
+                       silent(boolean)
+                     ]).
+
+
+%!  coverage(:Goal)
 %
-%   Report on coverage by Goal. Goal is executed as in once/1. Options
-%   processed:
+%   As  call(Goal),  collecting  coverage  information   while  Goal  is
+%   running. If Goal succeeds with a   choice point, coverage collection
+%   is suspended and  resumed  if  we   backtrack  into  Goal.  Calls to
+%   coverage/1 may be nested.
+
+coverage(Goal) :-
+    setup_call_cleanup(
+        '$cov_start'(Level),
+        cov_run(Goal, Level),
+        '$cov_stop'(Level)).
+
+cov_run(Goal, Level) :-
+    call(Goal),
+    deterministic(Det),
+    (   Det == true
+    ->  true
+    ;   (   '$cov_stop'(Level)
+        ;   '$cov_start'(Level),
+            fail
+        )
+    ).
+
+%!  coverage(:Goal, +Options) is semidet.
 %
+%   Collect and optionally report coverage by  Goal. Goal is executed as
+%   in once/1. Options processed:
+%
+%     - show(+Boolean)
+%       When `true` (default), call show_coverage/1 passing Options
+%       to show the collected coverage data and reset the data.  When
+%       `false`, collect the data but do not reset it.  If there is
+%       already existing data the new data is added.
+
+coverage(Goal, Options) :-
+    clean_output(Options),
+    setup_call_cleanup(
+        '$cov_start'(Level),
+        once(Goal),
+        cov_finish(Level, Options)).
+
+show_coverage(Goal, Options) :-
+    print_message(warning, coverage(deprecated(show_coverage/2))),
+    coverage(Goal, Options).
+
+cov_finish(Level, Options) :-
+    option(show(true), Options, true),
+    !,
+    '$cov_stop'(Level),
+    (   Level == 1
+    ->  show_coverage(Options),
+        cov_reset
+    ;   true
+    ).
+cov_finish(Level, _) :-
+    '$cov_stop'(Level).
+
+
+%!  show_coverage(+Options) is det.
+%
+%   Show collected coverage data. By default   it reports the percentage
+%   of called and  failed  clauses  related   to  covered  files.  Using
+%   dir(Dir), detailed line-by-line annotated files   are created in the
+%   directory Dir.  Other options control the level of detail.
+%
+%     - all(+Boolean)
+%       When true, report on any file in which some predicate was
+%       called.
 %     - modules(+Modules)
-%       Provide a detailed report on Modules. For backwards
-%       compatibility this is the same as providing a list of
-%       modules in the second argument.
+%       Only report on files that implement one of the given Modules.
+%     - roots(+Directories)
+%       Only report on files below one of the given roots.  Each
+%       directory in Directories can be a specification for
+%       absolute_file_name/3.
 %     - annotate(+Bool)
 %       Create an annotated file for the detailed results.
 %       This is implied if the `ext` or `dir` option are
@@ -119,11 +253,13 @@ expansion may harm the results.
 %     - color(Boolean)
 %       Controls using ANSI escape sequences to color the output
 %       in the annotated source.  Default is `true`.
+%     - width(+Columns)
+%       Presumed with of the output window.
 %
 %   For example, run a goal and create   annotated  files in a directory
 %   `cov` using:
 %
-%       ?- show_coverage(mygoal, [dir(cov)]).
+%       ?- show_coverage([dir(cov)]).
 %
 %   @bug Color annotations are created using   ANSI escape sequences. On
 %   most systems these are displayed  if  the   file  is  printed on the
@@ -132,27 +268,17 @@ expansion may harm the results.
 %   convert the files to HTML. It would  probably be better to integrate
 %   the output generation with library(pldoc/doc_htmlsrc).
 
-show_coverage(Goal) :-
-    show_coverage(Goal, []).
-show_coverage(Goal, Modules) :-
-    maplist(atom, Modules),
-    !,
-    show_coverage(Goal, [modules(Modules)]).
-show_coverage(Goal, Options) :-
-    clean_output(Options),
-    setup_call_cleanup(
-        '$cov_start',
-        once(Goal),
-        cleanup_trace(Options)).
-
-cleanup_trace(Options) :-
-    '$cov_stop',
+show_coverage(_:Options), is_list(Options) =>
     covered(Succeeded, Failed),
     (   report_hook(Succeeded, Failed)
     ->  true
     ;   file_coverage(Succeeded, Failed, Options)
-    ),
-    '$cov_reset'.
+    ).
+show_coverage(_:Goal), Goal=_:Call, callable(Call) =>
+    print_message(warning, cov_deprecated(show_coverage)),
+    coverage(Goal, []).
+show_coverage(_:Options) =>
+    must_be(list, Options).
 
 %!  covered(-Succeeded, -Failed) is det.
 %
@@ -176,48 +302,74 @@ covered(Succeeded, Failed) :-
 %   defined in the modules Modules.
 
 file_coverage(Succeeded, Failed, Options) :-
-    format('~N~n~`=t~78|~n'),
-    format('~tCoverage by File~t~78|~n'),
-    format('~`=t~78|~n'),
-    format('~w~t~w~64|~t~w~72|~t~w~78|~n',
-           ['File', 'Clauses', '%Cov', '%Fail']),
-    format('~`=t~78|~n'),
+    tty_width(Width, Options),
+    W is Width - 8,
+    CovCol is W - 6,
+    ClausesCol is CovCol - 6,
+
+    header('Coverage by File', W),
+    ansi_format(bold, '~w~t~w~*|~t~w~*|~t~w~*|~n',
+                ['File', 'Clauses', ClausesCol, '%Cov', CovCol, '%Fail', W]),
+    hr(W),
     forall(source_file(File),
-           file_coverage(File, Succeeded, Failed, Options)),
-    format('~`=t~78|~n').
+           file_summary(File, Succeeded, Failed,
+                        W, CovCol, ClausesCol,
+                        Options)),
+    hr(W),
 
-file_coverage(File, Succeeded, Failed, Options) :-
-    findall(Cl, clause_source(Cl, File, _), Clauses),
-    sort(Clauses, All),
-    (   ord_intersect(All, Succeeded)
-    ->  true
-    ;   ord_intersect(All, Failed)
-    ),                                  % Clauses from this file are touched
+    (   annotate_files(Options)
+    ->  forall(source_file(File),
+               file_details(File, Succeeded, Failed, Options))
+    ;   true
+    ).
+
+file_summary(File, Succeeded, Failed, W, CovCol, ClausesCol, Options) :-
+    cov_report_file(File, PrintFile, Options),
+    cov_clause_sets(File, Succeeded, Failed, Sets),
+    \+ ( Sets.failed == [],
+         Sets.succeeded == []
+       ),
     !,
-    ord_intersection(All, Failed, FailedInFile),
-    ord_intersection(All, Succeeded, SucceededInFile),
-    ord_subtract(All, SucceededInFile, UnCov1),
-    ord_subtract(UnCov1, FailedInFile, Uncovered),
-
-    clean_set(All, All_wo_system),
-    clean_set(Uncovered, Uncovered_wo_system),
-    clean_set(FailedInFile, Failed_wo_system),
-
-    length(All_wo_system, AC),
-    length(Uncovered_wo_system, UC),
-    length(Failed_wo_system, FC),
+    length(Sets.clauses, AC),
+    length(Sets.uncovered, UC),
+    length(Sets.failed, FC),
 
     CP is 100-100*UC/AC,
     FCP is 100*FC/AC,
-    summary(File, 56, SFile),
-    format('~w~t ~D~64| ~t~1f~72| ~t~1f~78|~n', [SFile, AC, CP, FCP]),
-    (   list_details(File, Options),
-        clean_set(SucceededInFile, Succeeded_wo_system),
-        ord_union(Failed_wo_system, Succeeded_wo_system, Covered)
-    ->  detailed_report(Uncovered_wo_system, Covered, File, Options)
-    ;   true
-    ).
-file_coverage(_,_,_,_).
+    summary(PrintFile, ClausesCol-8, SFile),
+    format('~w ~`.t ~D~*| ~t~1f~*| ~t~1f~*|~n',
+           [SFile, AC, ClausesCol, CP, CovCol, FCP, W]).
+file_summary(_,_,_,_,_,_,_).
+
+file_details(File, Succeeded, Failed, Options) :-
+    cov_report_file(File, _PrintFile, Options),
+    cov_clause_sets(File, Succeeded, Failed, Sets),
+    \+ ( Sets.failed == [],
+         Sets.succeeded == []
+       ),
+    !,
+    ord_union(Sets.failed, Sets.succeeded, Covered),
+    detailed_report(Sets.uncovered, Covered, File, Options).
+file_details(_,_,_,_).
+
+%!  cov_clause_sets(+File, +Succeeded, +Failed, -Sets) is det.
+
+cov_clause_sets(File, Succeeded, Failed,
+                #{ clauses: All_wo_system,
+                   succeeded: Succeeded_wo_system,
+                   failed: Failed_wo_system,
+                   uncovered: Uncovered_wo_system
+                 }) :-
+    file_clauses(File, FileClauses),
+    ord_intersection(FileClauses, Failed, FailedInFile),
+    ord_intersection(FileClauses, Succeeded, SucceededInFile),
+    ord_subtract(FileClauses, SucceededInFile, UnCov1),
+    ord_subtract(UnCov1, FailedInFile, Uncovered),
+
+    clean_set(FileClauses, All_wo_system),
+    clean_set(SucceededInFile, Succeeded_wo_system),
+    clean_set(FailedInFile, Failed_wo_system),
+    clean_set(Uncovered, Uncovered_wo_system).
 
 clean_set(Clauses, UserClauses) :-
     exclude(is_pldoc, Clauses, Clauses_wo_pldoc),
@@ -245,6 +397,13 @@ summary(String, MaxLen, Summary) :-
         string_concat('...', End, Summary)
     ).
 
+%!  file_clauses(+File, -Set) is det.
+%
+%   Set are all clauses in File as an ordered set.
+
+file_clauses(File, Set) :-
+    findall(Cl, clause_source(Cl, File, _), Clauses),
+    sort(Clauses, Set).
 
 %!  clause_source(+Clause, -File, -Line) is semidet.
 %!  clause_source(-Clause, +File, -Line) is semidet.
@@ -267,23 +426,61 @@ clause_source(Clause, File, Line) :-
     clause_property(Clause, file(File)),
     clause_property(Clause, line_count(Line)).
 
-%!  list_details(+File, +Options) is semidet.
+%!  cov_report_file(+File, -PrintFile, +Options) is semidet.
+%
+%   Whether or not to report on File.   Scenarios:
+%
+%     - all(true)
+%       Report on every file.
+%     - modules(List)
+%       Report of the file implements one of the modules in List.
+%     - roots(+Dirs)
+%       Report if the file appears below one of Dirs.
+%     - (default)
+%       Report if the file implements a `user` or `test` module.
 
-list_details(File, Options) :-
+cov_report_file(File, _, _) :-
+    source_file(cov_report_file(_,_,_), File),
+    !,
+    fail.                               % do not report on myself
+cov_report_file(File, File, Options) :-
+    option(all(true), Options),
+    !.
+cov_report_file(File, File, Options) :-
     option(modules(Modules), Options),
     source_file_property(File, module(M)),
     memberchk(M, Modules),
     !.
-list_details(File, Options) :-
+cov_report_file(File, PrintFile, Options) :-
+    option(roots(Roots), Options),
+    !,
+    must_be(list, Roots),
+    member(Root, Roots),
+    absolute_file_name(Root, Path,
+                       [ file_type(directory),
+                         solutions(all),
+                         file_errors(fail)
+                       ]),
+    ensure_slash(Path, Path1),
+    atom_concat(Path1, PrintFile, File),
+    !.
+cov_report_file(File, File, _Options) :-
     (   source_file_property(File, module(M)),
         module_property(M, class(user))
     ->  true
     ;   forall(source_file_property(File, module(M)),
                module_property(M, class(test)))
-    ),
-    annotate_file(Options).
+    ).
 
-annotate_file(Options) :-
+ensure_slash(Path, Path) :-
+    sub_atom(Path, _, _, 0, /),
+    !.
+ensure_slash(Path, Path1) :-
+    atom_concat(Path, /, Path1).
+
+%!  annotate_files(+Options) is semidet.
+
+annotate_files(Options) :-
     (   option(annotate(true), Options)
     ;   option(dir(_), Options)
     ;   option(ext(_), Options)
@@ -296,7 +493,7 @@ annotate_file(Options) :-
 %   @arg Covered is a list of covered clauses
 
 detailed_report(Uncovered, Covered, File, Options):-
-    annotate_file(Options),
+    annotate_files(Options),
     !,
     convlist(line_annotation(File, uncovered), Uncovered, Annot1),
     convlist(line_annotation(File, covered),   Covered,   Annot20),
@@ -473,6 +670,8 @@ annotate_file(Source, Annotations, Options) :-
         make_directory_path(Dir)
     ;   file_name_extension(Source, Ext, CovPath)
     ),
+    summary(Source, 30, SSource),
+    progress('Annotating ~w in ~w ... ', [SSource,CovPath]),
     keysort(Annotations, SortedAnnotations),
     setup_call_cleanup(
         open(Source, read, In),
@@ -552,23 +751,50 @@ margins(0, Margin, Options) :-
 		 *          SAVE/RELOAD		*
 		 *******************************/
 
-%!  cov_save_data(+File) is det.
+%!  cov_save_data(+File, +Options) is det.
 %
-%   Save the coverage information to File.
+%   Save the coverage information to File.  Options:
+%
+%     - append(true)
+%       Append to File rather than truncating the data if the file
+%       exists.
+%
+%   The File is  opened  using   lock(exclusive),  which  implies  that,
+%   provided the OS and file system   implements  file locking, multiple
+%   processes may save coverage data to the same file.
+%
+%   The saved data is highly specific to the  setup in which it has been
+%   created. It can typically only be  reloaded using cov_load_data/2 in
+%   the same Prolog executable  using  the   same  options  and with all
+%   relevant source file unmodified at the same location.
+%
+%   Reproducibility can be improved by  using   `.qlf`  files  or _saved
+%   states_.
 
 :- thread_local
     saved_clause/2.                     % Clause, Ref
 
-cov_save_data(File) :-
+cov_save_data(File, Options) :-
+    (   option(append(true), Options)
+    ->  Mode = append
+    ;   Mode = write
+    ),
+    absolute_file_name(File, Path, [ access(write) ]),
     setup_call_cleanup(
-        open(File, write, Out, [encoding(utf8)]),
+        open(Path, Mode, Out,
+             [ encoding(utf8),
+               lock(exclusive)
+             ]),
         cov_save_to_stream(Out),
         ( retractall(saved_clause(_,_)),
           close(Out))).
 
 cov_save_to_stream(Out) :-
+    get_time(Now),
+    format(Out, 'cov_begin_data(~1f).~n', [Now]),
     forall('$cov_data'(Site, Enter, Exit),
-           cov_save_entry(Out, Site, Enter, Exit)).
+           cov_save_entry(Out, Site, Enter, Exit)),
+    format(Out, 'cov_end_data.~n', []).
 
 :- det(cov_save_entry/4).
 cov_save_entry(Out, call_site(Clause, PC), Enter, Exit) =>
@@ -590,19 +816,127 @@ save_clause(_Out, Clause, Ref) :-
 save_clause(Out, Clause, Ref) :-
     clause_property(Clause, file(File)),
     clause_property(Clause, line_count(Line)),
+    clause_property(Clause, size(Bytes)),
     clause_property(Clause, predicate(PI)),
+    source_file_property(File, load_context(Module, Location, Options)),
     nth_clause(_, Nth, Clause),
     !,
     (   predicate_property(saved_clause(_,_), number_of_clauses(N))
     ->  Ref is N+1
     ;   Ref = 1
     ),
-    format(Out, '~q.~n', [cl(PI, Nth, File:Line, Ref)]),
+    format(Out, '~q.~n', [cl(PI, Nth, Bytes, File:Line, Module, Location, Options, Ref)]),
     assertz(saved_clause(Clause, Ref)).
 save_clause(_Out, Clause, _Ref) :-
     debug(cov(save), 'Could not save clause ~p', [Clause]).
 
+%!  cov_load_data(+File, +Options) is det.
+%
+%   Reload coverage data from File.  Options:
+%
+%     - load(true)
+%       If specified and the file in which a clauses is expected to
+%       exist, load the file using load_files/2 with the same options
+%       as used to initially load the file.
+%     - silent(+Boolean)
+%       When `true`, do not emit messages on not loaded source files.
+%
+%   Data is assumed to be reliable if   the Nth-clause of a predicate is
+%   loaded from the same file at the same   line number and has the same
+%   size. Unreliable data is ignored, silently if silent(true) is used.
 
+:- thread_local
+    warned/1.
+
+cov_load_data(File, Options) :-
+    absolute_file_name(File, Path, [ access(read) ]),
+    setup_call_cleanup(
+        open(Path, read, In, [encoding(utf8)]),
+        cov_load_data_from_stream(In, Options),
+        ( retractall(saved_clause(_,_)),
+          retractall(warned(_)),
+          close(In))).
+
+cov_load_data_from_stream(In, Options) :-
+    read_term(In, Term, []),
+    cov_load_data_from_stream(Term, In, Options).
+
+cov_load_data_from_stream(end_of_file, _, _) :-
+    !.
+cov_load_data_from_stream(Term, In, Options) :-
+    cov_restore_data(Term, Options),
+    read_term(In, Term2, []),
+    cov_load_data_from_stream(Term2, In, Options).
+
+cov_restore_data(cov_begin_data(_), _Options) =>
+    true.
+cov_restore_data(cl(PI, Nth,
+                    Bytes, File:Line, Module, _Location, LoadOptions,
+                    Ref), Options) =>
+    (   restore_clause(PI, Nth, Bytes, File, Line, Ref)
+    ->  true
+    ;   source_file(File)
+    ->  warn(File, coverage(source_changed(File, PI)))
+    ;   option(load(true), Options)
+    ->  load_files(Module:File, [if(not_loaded)|LoadOptions]),
+        (   restore_clause(PI, Nth, Bytes, File, Line, Ref)
+        ->  true
+        ;   warn(File, coverage(source_changed(File, PI)))
+        )
+    ;   option(silent(true), Options)
+    ->  true
+    ;   warn(File, coverage(no_source(File)))
+    ).
+cov_restore_data(cs(Ref, PC, Enter, Exit), _Options) =>
+    (   saved_clause(Clause, Ref)
+    ->  '$cov_add'(call_site(Clause, PC), Enter, Exit)
+    ;   true
+    ).
+cov_restore_data(cs(Ref, Enter, Exit), _Options) =>
+    (   saved_clause(Clause, Ref)
+    ->  '$cov_add'(clause(Clause), Enter, Exit)
+    ;   true
+    ).
+cov_restore_data(cov_end_data, _Options) =>
+    retractall(saved_clause(_,_)).
+
+restore_clause(PI, _Nth, Bytes, File, Line, Ref) :-
+    pi_head(PI, Head),
+    predicate_property(Head, multifile),
+    !,
+    (   nth_clause(Head, _, Clause),
+        clause_property(Clause, file(File)),
+        clause_property(Clause, line_count(Line)),
+        clause_property(Clause, size(Bytes))
+    ->  assertz(saved_clause(Clause, Ref))
+    ;   warn(File, coverage(no_multifile_source(File:Line, PI)))
+    ).
+restore_clause(PI, Nth, Bytes, File, Line, Ref) :-
+    pi_head(PI, Head),
+    (   nth_clause(Head, Nth, Clause)
+    ->  (   clause_property(Clause, file(File)),
+            clause_property(Clause, line_count(Line)),
+            clause_property(Clause, size(Bytes))
+        ->  assertz(saved_clause(Clause, Ref))
+        ;   warn(File, coverage(source_changed(File:Line, PI, Nth)))
+        )
+    ).
+
+warn(Term, _Msg) :-
+    warned(Term),
+    !.
+warn(Term, Msg) :-
+    assertz(warned(Term)),
+    print_message(warning, Msg).
+
+
+%!  cov_reset is det.
+%
+%   Discard  all  collected  coverage  data.  This  predicate  raises  a
+%   permission error if coverage collection is in progress.
+
+cov_reset :-
+    '$cov_reset'.
 
 
 		 /*******************************
@@ -612,13 +946,37 @@ save_clause(_Out, Clause, _Ref) :-
 :- multifile
     prolog:message//1.
 
-prolog:message(coverage(clause_info(ClauseRef))) -->
+prolog:message(coverage(Msg)) -->
+    message(Msg).
+
+message(clause_info(ClauseRef)) -->
     [ 'Inconsistent clause info for '-[] ],
     clause_msg(ClauseRef).
-prolog:message(coverage(unreported_call_sites(ClauseRef, PCList))) -->
+message(unreported_call_sites(ClauseRef, PCList)) -->
     [ 'Failed to report call sites for '-[] ],
     clause_msg(ClauseRef),
     [ nl, '  Missed at these PC offsets: ~p'-[PCList] ].
+message(source_changed(File, PI)) -->
+    [ 'Predicate ', ansi(code, '~p', [PI]), ' cannot be found while file ',
+      url(File), ' is loaded.'
+    ].
+message(no_source(File)) -->
+    [ 'File ', url(File), ' is not loaded.  Please re-run with ', nl,
+      'file loaded or use the ', ansi(code, 'load(true)', []), ' option.'
+    ].
+message(no_multifile_source(Location, PI)) -->
+    [ 'Could not find matching clause for multifile predicate ',
+      ansi(code, '~p', [PI]), ' at ', url(Location)
+    ].
+message(source_changed(File:Line, PI, Nth)) -->
+    [ '~D-th clause for '-[Nth], ansi(code, '~p', [PI]),
+      ' cannot be found at ', url(File:Line), '.'
+    ].
+message(deprecated(show_coverage/2)) -->
+    [ 'show_coverage/2 is deprecated.  Please use coverage/2', nl,
+      'with the same arguments.'
+    ].
+
 
 clause_msg(ClauseRef) -->
     { clause_pi(ClauseRef, PI),
@@ -626,3 +984,42 @@ clause_msg(ClauseRef) -->
       clause_property(ClauseRef, line_count(Line))
     },
     [ '~p at'-[PI], nl, '  ', url(File:Line) ].
+
+
+		 /*******************************
+		 *      TTY PRINT SUPPORT	*
+		 *******************************/
+
+progress(_, _) :-
+    current_prolog_flag(verbose, silent),
+    !.
+progress(Format, Args) :-
+    stream_property(user_output, tty(true)),
+    !,
+    format(user_output, '\r\e[2K', []),
+    ansi_format(comment, Format, Args),
+    flush_output(user_output).
+progress(Format, Args) :-
+    format(Format, Args),
+    nl.
+
+header(Title, Width) :-
+    hr(Width),
+    ansi_format([bold], '~t~w~t~*|', [Title,Width]),
+    nl.
+
+hr(Width) :-
+    format('~N~`\u2015t~*|~n', [Width]).
+
+%!  tty_width(-Width, +Options) is det.
+
+tty_width(W, Options) :-
+    option(width(W), Options),
+    !.
+:- if(current_predicate(tty_size/2)).
+tty_width(W, _Options) :-
+    catch(tty_size(_, TtyW), _, fail),
+    !,
+    W is max(60, TtyW).
+:- endif.
+tty_width(78, _).
