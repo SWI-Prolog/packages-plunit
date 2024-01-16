@@ -372,7 +372,7 @@ print_clause_line((Module:Name/Arity)-Lines):-
 
 clause_call_site_annotation(ClauseRef, NextPC, Line, Annot, Len) :-
     clause_call_site(ClauseRef, PC-NextPC, Line:_LPos),
-    (   '$cov_data'(call_site(ClauseRef, NextPC, _PI), Entered, Exited)
+    (   '$cov_data'(call_site(ClauseRef, NextPC), Entered, Exited)
     ->  counts_annotation(Entered, Exited, Annot, Len)
     ;   '$fetch_vm'(ClauseRef, PC, _, VMI),
         \+ no_annotate_call_site(VMI)
@@ -419,7 +419,7 @@ file_text(File, String) :-
         close(In)).
 
 check_covered_call_sites(Clause, Reported) :-
-    findall(PC, ('$cov_data'(call_site(Clause,PC,_), Enter, _), Enter > 0), Seen),
+    findall(PC, ('$cov_data'(call_site(Clause,PC), Enter, _), Enter > 0), Seen),
     sort(Reported, SReported),
     sort(Seen, SSeen),
     ord_subtract(SSeen, SReported, Missed),
@@ -539,9 +539,8 @@ margins(0, Margin, Options) :-
 %
 %     - ClauseRef
 %       The specified clause
-%     - call_site(ClauseRef, PC, PI)
-%       A call was make in ClauseRef at the given program counter to
-%       the predicate indicated by PI.
+%     - call_site(ClauseRef, PC)
+%       A call was make in ClauseRef at the given program counter.
 
 :- multifile
     report_hook/2.
