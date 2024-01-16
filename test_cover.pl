@@ -40,14 +40,17 @@
           ]).
 :- autoload(library(apply), [exclude/3, maplist/2, convlist/3]).
 :- autoload(library(ordsets),
-            [ord_intersect/2, ord_intersection/3, ord_subtract/3]).
-:- autoload(library(pairs), [group_pairs_by_key/2]).
+            [ord_intersect/2, ord_intersection/3, ord_subtract/3, ord_union/3]).
+:- autoload(library(pairs), [group_pairs_by_key/2, pairs_keys_values/3]).
 :- autoload(library(ansi_term), [ansi_format/3]).
 :- autoload(library(filesex), [directory_file_path/3, make_directory_path/1]).
-:- autoload(library(lists), [append/3]).
+:- autoload(library(lists), [append/3, flatten/2, max_list/2]).
 :- autoload(library(option), [option/2, option/3]).
 :- autoload(library(readutil), [read_line_to_string/2]).
 :- use_module(library(prolog_breakpoints), []).
+:- autoload(library(prolog_clause), [clause_info/4]).
+:- autoload(library(solution_sequences), [call_nth/2]).
+:- use_module(library(debug), [debug/3]).
 
 :- set_prolog_flag(generate_debug_info, false).
 
@@ -544,6 +547,62 @@ margins(0, Margin, Options) :-
 
 :- multifile
     report_hook/2.
+
+		 /*******************************
+		 *          SAVE/RELOAD		*
+		 *******************************/
+
+%!  cov_save_data(+File) is det.
+%
+%   Save the coverage information to File.
+
+:- thread_local
+    saved_clause/2.                     % Clause, Ref
+
+cov_save_data(File) :-
+    setup_call_cleanup(
+        open(File, write, Out, [encoding(utf8)]),
+        cov_save_to_stream(Out),
+        ( retractall(saved_clause(_,_)),
+          close(Out))).
+
+cov_save_to_stream(Out) :-
+    forall('$cov_data'(Site, Enter, Exit),
+           cov_save_entry(Out, Site, Enter, Exit)).
+
+:- det(cov_save_entry/4).
+cov_save_entry(Out, call_site(Clause, PC), Enter, Exit) =>
+    save_clause(Out, Clause, Ref),
+    (   nonvar(Ref)
+    ->  format(Out, '~q.~n', [cs(Ref, PC, Enter, Exit)])
+    ;   true
+    ).
+cov_save_entry(Out, clause(Clause), Enter, Exit) =>
+    save_clause(Out, Clause, Ref),
+    (   nonvar(Ref)
+    ->  format(Out, '~q.~n', [cs(Ref, Enter, Exit)])
+    ;   true
+    ).
+
+save_clause(_Out, Clause, Ref) :-
+    saved_clause(Clause, Ref),
+    !.
+save_clause(Out, Clause, Ref) :-
+    clause_property(Clause, file(File)),
+    clause_property(Clause, line_count(Line)),
+    clause_property(Clause, predicate(PI)),
+    nth_clause(_, Nth, Clause),
+    !,
+    (   predicate_property(saved_clause(_,_), number_of_clauses(N))
+    ->  Ref is N+1
+    ;   Ref = 1
+    ),
+    format(Out, '~q.~n', [cl(PI, Nth, File:Line, Ref)]),
+    assertz(saved_clause(Clause, Ref)).
+save_clause(_Out, Clause, _Ref) :-
+    debug(cov(save), 'Could not save clause ~p', [Clause]).
+
+
 
 
 		 /*******************************
