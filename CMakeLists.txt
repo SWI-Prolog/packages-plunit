@@ -4,11 +4,9 @@ project(swipl-plunit)
 include("../cmake/PrologPackage.cmake")
 
 swipl_plugin(plunit
-	     PL_LIBS plunit.pl test_wizard.pl test_cover.pl)
+	     PL_LIBS plunit.pl test_wizard.pl)
 
 swipl_examples(examples/read.pl examples/simple.pl)
 
-pkg_doc(plunit
-	SECTION
-	SOURCE test_cover.pl)
+pkg_doc(plunit)
 
