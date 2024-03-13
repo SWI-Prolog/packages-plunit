@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2006-2023, University of Amsterdam
+    Copyright (c)  2006-2024, University of Amsterdam
 			      VU University Amsterdam
 			      CWI, Amsterdam
 			      SWI-Prolog Solutions b.v.
@@ -1095,15 +1095,15 @@ run_test_once(Unit, Name, Progress, Line, Options, Body) :-
 
 :- det(report_result/4).
 report_result(failure(Unit, Name, Line, How, Time),
-	      Progress, Output, Options) :-
-    !,
+	      Progress, Output, Options) =>
     failure(Unit, Name, Progress, Line, How, Time, Output, Options).
 report_result(success(Unit, Name, Line, Determinism, Time),
-	      Progress, Output, Options) :-
-    !,
+	      Progress, Output, Options) =>
     success(Unit, Name, Progress, Line, Determinism, Time, Output, Options).
-report_result(setup_failed(_Unit, _Name, _Line),
-	      _Progress, _Output, _Options).
+report_result(setup_failed(Unit, Name, Line, Time, Output, Result),
+	      Progress, _Output, Options) =>
+    failure(Unit, Name, Progress, Line,
+            setup_failed(Result), Time, Output, Options).
 
 %!  run_test_6(+Unit, +Name, +Line, +Options, :Body, -Result) is det.
 %
@@ -1126,13 +1126,16 @@ report_result(setup_failed(_Unit, _Name, _Line),
 %     - setup_failed(Unit, Name, Line)
 
 run_test_6(Unit, Name, Line, Options, Body, Result) :-
-    option(setup(_Setup), Options),
+    option(setup(Setup), Options),
     !,
-    (   unit_module(Unit, Module),
-        setup(Module, test(Unit,Name,Line), Options)
+    unit_module(Unit, Module),
+    capture_output(call_time(reify(call_ex(Module, Setup), SetupResult),
+                             Time),
+                   Output),
+    (   SetupResult == true
     ->  run_test_7(Unit, Name, Line, Options, Body, Result),
         cleanup(Module, Options)
-    ;   Result = setup_failed(Unit, Name, Line)
+    ;   Result = setup_failed(Unit, Name, Line, Time, Output, SetupResult)
     ).
 run_test_6(Unit, Name, Line, Options, Body, Result) :-
     unit_module(Unit, Module),
@@ -2242,6 +2245,15 @@ failure(throw(Error)) -->
 failure(message) -->
     !,
     [ 'Generated unexpected warning or error'-[] ].
+failure(setup_failed(throw(Error))) -->
+    { Error = error(_,_),
+      !,
+      message_to_string(Error, Message)
+    },
+    [ 'test setup goal raised error: ~w'-[Message] ].
+failure(setup_failed(_)) -->
+    !,
+    [ 'test setup goal failed' ].
 failure(Why) -->
     [ '~p'-[Why] ].
 
