@@ -738,18 +738,22 @@ run_tests_sync(Units0, Options) :-
     asserta(test_count(Count)),
     save_output_state,
     setup_call_cleanup(
-	setup_jobs(Count),
-	setup_call_cleanup(
-	    setup_trap_assertions(Ref),
-	    ( call_time(run_units(Units, Options), Time),
-              test_summary(_All, Summary)
-            ),
-	    report_and_cleanup(Ref, Time, Options)),
-	cleanup_jobs),
+        setup_trap_assertions(Ref),
+        call_time(setup_jobs_and_run_units(Count, Units, Summary, Options),
+                  Time),
+        report_and_cleanup(Ref, Time, Options)),
     (   option(summary(Summary), Options)
     ->  true
     ;   test_summary_passed(Summary) % fail if some test failed
     ).
+
+setup_jobs_and_run_units(Count, Units, Summary, Options) :-
+    setup_call_cleanup(
+        setup_jobs(Count),
+        ( run_units(Units, Options),
+          test_summary(_All, Summary)
+        ),
+        cleanup_jobs).
 
 %!  report_and_cleanup(+Ref, +Time, +Options)
 %
