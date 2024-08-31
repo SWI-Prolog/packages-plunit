@@ -147,7 +147,7 @@ with different inputs.  If an error occurs, the test is reported as
     \termitem{true}{AnswerTerm Cmp Value}
 Body should succeed deterministically. If a choicepoint is left open, a
 warning is printed to STDERR ("Test succeeded with choicepoint"). That
-warning can be suppressed by adding the \term{nondet} keyword. \arg{AnswerTerm}
+warning can be suppressed by adding the \const{nondet} keyword. \arg{AnswerTerm}
 is compared to \arg{Value} using the comparison operator \arg{Cmp}. \arg{Cmp}
 is typically one of =/2, ==/2, =:=/2 or =@=/2,%
     \footnote{The =@= predicate (denoted \emph{structural equivalence})
