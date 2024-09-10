@@ -69,7 +69,6 @@ PlUnit environment in SICStus. Tested and  developed with SICStus Prolog
 3.12.7.
 
 @author         Jan Wielemaker
-@license        GPL+SWI-exception or Artistic 2.0
 */
 
 %% copy_term(+Term,?Copy, Goals)
