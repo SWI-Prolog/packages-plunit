@@ -1023,12 +1023,12 @@ run_test(Unit, Name, Line, UnitOptions, Options, Body) :-
     option(forall(Generator), Options),
     !,
     unit_module(Unit, Module),
-    term_variables(Generator, Vars),
     start_test(Unit, @(Name,Line), Nth),
     State = state(0),
     call_time(forall(Module:Generator,            % may become concurrent
                      (   incr_forall(State, I),
-                         run_test_once6(Unit, Name, forall(Vars, Nth-I), Line,
+                         run_test_once6(Unit, Name,
+                                        forall(Generator, Nth-I), Line,
                                         UnitOptions, Options, Body)
                      )),
                      Time),
@@ -1071,7 +1071,7 @@ inherit_option(Name, Options0, Chain, Default, Options) :-
 	Options = [Opt|Options0]
     ).
 
-%!  run_test_once(+Unit, +Name, Progress, +Line, +Options, +Body)
+%!  run_test_once(+Unit, +Name, +Progress, +Line, +Options, +Body)
 %
 %   Deal with occurs_check, i.e., running the  test multiple times with different
 %   unification settings wrt. the occurs check.
@@ -1826,7 +1826,7 @@ progress(UnitTest, _Progress, forall(end, Nth, FTotal), Time) =>
     ),
     test_count(Total),
     job_feedback(information, progress(UnitTest, forall(FTotal,FFailed), Nth/Total, Time)).
-progress(UnitTest, Progress, Result, Time), Progress = forall(_Vars, Nth-_I) =>
+progress(UnitTest, Progress, Result, Time), Progress = forall(_Gen, Nth-_I) =>
     with_mutex(plunit_forall_counter,
                update_forall_failures(Nth, Result)),
     test_count(Total),
@@ -2016,7 +2016,7 @@ message(plunit(begin(Unit:Test, _Location, Progress))) -->
 message(plunit(end(_UnitTest, _Location, _Progress))) -->
     [].
 message(plunit(progress(_UnitTest, Status, _Progress, _Time))) -->
-    { Status = forall(_,_)
+    { Status = forall(_Gen,_NthI)
     ; Status == assertion
     },
     !.
@@ -2141,11 +2141,11 @@ message(concurrent) -->
       'See set_test_options/1 with jobs(Count) for concurrent testing.'
     ].
 
-test_name(Name, forall(Bindings, _Nth-I)) -->
+test_name(Name, forall(Generator, _Nth-I)/_Total) -->
     !,
     test_name(Name, -),
-    [ ' (~d-th forall bindings = '-[I],
-      ansi(code, '~p', [Bindings]), ')'-[]
+    [ ' (~d-th forall generator = '-[I],
+      ansi(code, '~p', [Generator]), ')'-[]
     ].
 test_name(Name, _) -->
     !,
