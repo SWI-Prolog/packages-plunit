@@ -1404,7 +1404,7 @@ success(Unit, Name, Progress, Line, Det, Time, _Output, Options) :-
 	)
     ->  progress(Unit:Name, Progress, passed, Time)
     ;   unit_file(Unit, File),
-	print_message(warning, plunit(nondet(File, Line, Name)))
+	print_message(warning, plunit(nondet(File:Line, Unit:Name, Progress)))
     ).
 
 %!  failure(+Unit, +Name, +Progress, +Line,
@@ -1872,9 +1872,10 @@ message(error(context_error(plunit_close(Name, -)), _)) -->
     [ 'PL-Unit: cannot close unit ~w: no open unit'-[Name] ].
 message(error(context_error(plunit_close(Name, Start)), _)) -->
     [ 'PL-Unit: cannot close unit ~w: current unit is ~w'-[Name, Start] ].
-message(plunit(nondet(File, Line, Name))) -->
-    locationprefix(File:Line),
-    [ 'PL-Unit: Test ~w: Test succeeded with choicepoint'- [Name] ].
+message(plunit(nondet(Pos, Test, Progress))) -->
+    locationprefix(Pos),
+    test_name(Test, Progress),
+    [ ': Test succeeded with choicepoint'-[] ].
 message(error(plunit(incompatible_options, Tests), _)) -->
     [ 'PL-Unit: incompatible test-options: ~p'-[Tests] ].
 message(plunit(sto(true))) -->
