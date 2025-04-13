@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2006-2024, University of Amsterdam
+    Copyright (c)  2006-2025, University of Amsterdam
 			      VU University Amsterdam
 			      CWI, Amsterdam
 			      SWI-Prolog Solutions b.v.
@@ -2616,3 +2616,16 @@ user:message_hook(informational, plunit(end(_Unit)), _Lines) :-
     format(user, ' done~n', []).
 
 :- endif.
+
+		 /*******************************
+		 *  SUPPRESS AUTOLOAD WARNINGS	*
+		 *******************************/
+
+'$nowarn_autoload'(set_test_options/1, _).
+'$nowarn_autoload'(run_tests/0, _).
+'$nowarn_autoload'(run_tests/1, _).
+'$nowarn_autoload'(run_tests/2, _).
+'$nowarn_autoload'(running_tests/0, _).
+'$nowarn_autoload'(current_test/5, _).
+'$nowarn_autoload'(current_test_unit/2, _).
+'$nowarn_autoload'(test_report/1, _).
