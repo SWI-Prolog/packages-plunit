@@ -302,6 +302,7 @@ begin_tests(Unit, Name, File:Line, Options) :-
     discontiguous(Name:'unit body'/2),
     asserta(loading_unit(Unit, Name, File, Old)).
 begin_tests(Unit, Name, File:_Line, _Options) :-
+    retractall(current_unit(Unit, Name, _, _)), % may be loaded before
     '$set_source_module'(Old, Old),
     asserta(loading_unit(Unit, Name, File, Old)).
 
@@ -326,6 +327,7 @@ begin_tests(Unit, Name, File:_Line, Options) :-
     ),
     asserta(loading_unit(Unit, Name, File, -)).
 begin_tests(Unit, Name, File:_Line, _Options) :-
+    retractall(current_unit(Unit, Name, _, _)),
     asserta(loading_unit(Unit, Name, File, -)).
 
 :- endif.
