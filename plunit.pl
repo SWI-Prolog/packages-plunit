@@ -641,31 +641,44 @@ capture_output(Goal, Msgs-Output, Options) :-
     ).
 
 %!  got_messages(:Goal, -Result)
+%
+%   Result is `true` if Goal printed a warning or error that requires a
+%   non-zero exit status.  Messages intercepted by message_hook/3 are
+%   not printed and thus not counted, so a test may trap the messages it
+%   expects.
 
 got_messages(Goal, Result) :-
     (   current_prolog_flag(on_warning, status)
     ;   current_prolog_flag(on_error, status)
     ), !,
-    nb_delete(plunit_got_message),
-    setup_call_cleanup(
-        asserta(( user:thread_message_hook(_Term, Kind, _Lines) :-
-                      got_message(Kind), fail), Ref),
-        Goal,
-        erase(Ref)),
-    (   nb_current(plunit_got_message, true)
+    message_counts(Errors0, Warnings0),
+    call(Goal),
+    message_counts(Errors, Warnings),
+    (   (   current_prolog_flag(on_warning, status),
+            Warnings > Warnings0
+        ;   current_prolog_flag(on_error, status),
+            Errors > Errors0
+        )
     ->  Result = true
     ;   Result = false
     ).
 got_messages(Goal, false) :-
     call(Goal).
 
-:- public got_message/1.
-got_message(warning) :-
-    current_prolog_flag(on_warning, status), !,
-    nb_setval(plunit_got_message, true).
-got_message(error) :-
-    current_prolog_flag(on_error, status), !,
-    nb_setval(plunit_got_message, true).
+%!  message_counts(-Errors, -Warnings) is det.
+%
+%   Number of errors and warnings printed by this thread.
+
+:- if(current_predicate(system:thread_statistics/3)).
+message_counts(Errors, Warnings) :-
+    thread_self(Me),
+    thread_statistics(Me, errors, Errors),
+    thread_statistics(Me, warnings, Warnings).
+:- else.
+message_counts(Errors, Warnings) :-
+    statistics(errors, Errors),
+    statistics(warnings, Warnings).
+:- endif.
 
 
 		 /*******************************
@@ -1460,7 +1473,7 @@ assert_cyclic(Term) :-
 		 *             JOBS             *
 		 *******************************/
 
-:- if(current_prolog_flag(threads, true)).
+:- if(current_predicate(system:thread_statistics/3)).
 
 :- dynamic
        job_data/2,		% Queue, Threads
